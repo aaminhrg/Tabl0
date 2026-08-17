@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Order</title>
+</head>
+<body>
+<script>
+// 404.html loads the real index.html and writes it into the document so client-side routing works
+fetch('/index.html').then(r=>r.text()).then(t=>{
+  // preserve original URL in the address bar
+  document.open();
+  document.write(t);
+  document.close();
+}).catch(()=>{
+  document.body.innerHTML = '<div style="padding:40px;text-align:center;font-family:Helvetica,Arial">Could not load site. Please try again later.</div>';
+});
+</script>
+</body>
+</html>
