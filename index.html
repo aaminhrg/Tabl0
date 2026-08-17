@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Order</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --espresso: #2B1D14;
+    --crema: #F2E9DC;
+    --paper: #FAF6EF;
+    --gold: #C08A2E;
+    --gold-bright: #D9A44C;
+    --line: #C9B8A0;
+    --ink: #2B1D14;
+    --ink-soft: #6B5B47;
+    --error: #A63D2F;
+    --ok: #3D6B4A;
+    --radius: 10px;
+    --mono: 'Courier New', Courier, monospace;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; background: var(--crema); color: var(--ink);
+    font-family: Georgia, 'Times New Roman', serif; min-height: 100vh; padding-bottom: 90px;
+  }
+  .hero {
+    background: var(--espresso); color: var(--crema); padding: 22px 20px 26px;
+    border-bottom: 3px solid var(--gold);
+  }
+  .hero-slug { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-bright); margin-bottom: 4px; }
+  .hero-name { font-size: 24px; margin: 0 0 4px; }
+  .hero-table { font-family: var(--mono); font-size: 12px; color: var(--line); }
+
+  .wrap { max-width: 560px; margin: 0 auto; padding: 18px 16px; }
+
+  .loyalty-banner {
+    background: #fff; border: 1px solid var(--gold); border-radius: var(--radius);
+    padding: 12px 16px; margin-bottom: 16px; display:flex; align-items:center; gap: 12px;
+  }
+  .loyalty-progress-track { flex:1; height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  .loyalty-progress-fill { height: 100%; background: var(--gold); }
+  .loyalty-text { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+
+  .signin-strip {
+    background: #fff; border: 1px dashed var(--line); border-radius: var(--radius);
+    padding: 10px 14px; margin-bottom: 16px; font-family: var(--mono); font-size: 12px;
+    color: var(--ink-soft); display:flex; justify-content:space-between; align-items:center; gap:10px;
+  }
+  .signin-strip a { color: var(--gold); cursor: pointer; text-decoration: underline; }
+
+  h2 {
+    font-size: 15px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft);
+    margin: 22px 0 12px; padding-bottom: 8px; border-bottom: 1px dashed var(--line);
+  }
+
+  .item {
+    background: #fff; border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px;
+    border: 1px solid var(--line); display:flex; align-items:center; gap: 12px; cursor:pointer;
+  }
+  .item:active { background: var(--crema); }
+  .item-info { flex: 1; }
+  .item-title { font-size: 16px; font-weight: bold; }
+  .item-desc { font-size: 13px; color: var(--ink-soft); margin-top: 2px; }
+  .item-price { font-family: var(--mono); font-size: 14px; color: var(--ink-soft); white-space: nowrap; }
+  .item.sold-out { opacity: 0.5; cursor: not-allowed; }
+  .sold-out-tag { font-family: var(--mono); font-size: 10px; color: var(--error); text-transform: uppercase; }
+
+  .empty { padding: 40px 16px; text-align:center; color: var(--ink-soft); font-style: italic; }
+
+  /* modal */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(43,29,20,0.6); display:flex; align-items:flex-end;
+    justify-content:center; z-index: 50;
+  }
+  .sheet {
+    background: var(--paper); width: 100%; max-width: 560px; border-radius: 16px 16px 0 0;
+    padding: 22px 20px 24px; max-height: 88vh; overflow-y: auto;
+  }
+  .sheet-title { font-size: 20px; font-weight: bold; margin: 0 0 4px; }
+  .sheet-desc { font-size: 13px; color: var(--ink-soft); margin-bottom: 16px; }
+  .group-title { font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); margin: 16px 0 8px; display:flex; justify-content:space-between; }
+  .req-tag { color: var(--gold); }
+  .option-row {
+    display:flex; align-items:center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line);
+    border-radius: 8px; margin-bottom: 6px; background:#fff; cursor:pointer;
+  }
+  .option-row.selected { border-color: var(--gold); background: #FBF3E4; }
+  .option-row.disabled { opacity: 0.45; cursor: not-allowed; }
+  .option-name { flex:1; }
+  .option-delta { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+
+  .qty-row { display:flex; align-items:center; gap: 14px; margin: 18px 0; justify-content:center; }
+  .qty-btn {
+    width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--gold); background: #fff;
+    color: var(--gold); font-size: 18px; cursor: pointer;
+  }
+  .qty-val { font-family: var(--mono); font-size: 18px; min-width: 24px; text-align:center; }
+
+  .btn { font-family: var(--mono); font-size: 14px; padding: 13px 18px; border: none; border-radius: 8px;
+    background: var(--gold); color: var(--espresso); font-weight: bold; cursor: pointer; width: 100%; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-ghost { background: transparent; border: 1px solid var(--line); color: var(--ink-soft); font-weight: normal; }
+  .btn-close { position:absolute; top:16px; right:16px; background:none; border:none; font-size: 20px; color: var(--ink-soft); cursor:pointer; }
+
+  .cart-bar {
+    position: fixed; bottom: 0; left: 0; right: 0; background: var(--espresso); color: var(--crema);
+    padding: 14px 18px; display:flex; align-items:center; justify-content:space-between; z-index: 40;
+    box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
+  }
+  .cart-bar-left { font-family: var(--mono); font-size: 13px; }
+  .cart-bar-btn { background: var(--gold); color: var(--espresso); border:none; border-radius: 8px; padding: 11px 20px; font-weight:bold; font-family: var(--mono); font-size: 13px; cursor:pointer; }
+
+  .cart-line { display:flex; align-items:center; gap:10px; padding: 10px 0; border-bottom: 1px dashed var(--line); }
+  .cart-line-info { flex:1; }
+  .cart-line-name { font-weight: bold; }
+  .cart-line-variants { font-size: 12px; color: var(--ink-soft); }
+  .cart-line-remove { background:none; border:none; color: var(--error); cursor:pointer; font-family: var(--mono); font-size: 12px; }
+  .cart-total-row { display:flex; justify-content:space-between; padding: 10px 0; font-family: var(--mono); }
+  .cart-total-row.grand { font-size: 16px; font-weight:bold; border-top: 1px solid var(--line); margin-top: 8px; padding-top: 12px; }
+  .reward-row { color: var(--ok); }
+
+  .otp-input { text-align:center; letter-spacing: 0.4em; font-size: 22px; font-family: var(--mono); }
+  input {
+    width: 100%; font-family: Georgia, serif; font-size: 15px; padding: 11px 12px;
+    border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); margin-top: 6px;
+  }
+  label { display:block; font-family: var(--mono); font-size: 11px; color: var(--ink-soft); margin-top: 14px; }
+  .msg { font-family: var(--mono); font-size: 12px; padding: 8px 12px; border-radius: 6px; margin-top: 12px; }
+  .msg.error { background: rgba(166,61,47,0.1); color: var(--error); }
+  .msg.ok { background: rgba(61,107,74,0.1); color: var(--ok); }
+  .center-screen { min-height: 100vh; display:flex; align-items:center; justify-content:center; text-align:center; padding: 20px; }
+</style>
+</head>
+<body>
+<div id="app-root"></div>
+
+<script>
+// ===== Configuration: your live Supabase project =====
+const SUPABASE_URL = 'https://yhrhqfqdxtgifahvkrnw.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_N91RJWdVtL5LgpB7u5uLAA_3NcHqYtt';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Reads /t/{cafe_slug}/{table_code} from the path, OR ?cafe=&table= for
+// easy testing by just opening this file directly in a browser.
+function parseTarget() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('cafe') && params.get('table')) {
+    return { cafeSlug: params.get('cafe'), tableCode: params.get('table') };
+  }
+  const parts = window.location.pathname.split('/').filter(Boolean);
+  const tIdx = parts.indexOf('t');
+  if (tIdx !== -1 && parts[tIdx + 1] && parts[tIdx + 2]) {
+    return { cafeSlug: parts[tIdx + 1], tableCode: parts[tIdx + 2] };
+  }
+  return null;
+}
+
+let state = {
+  view: 'loading',
+  target: null,
+  data: null,       // resolve_table_link() payload
+  cart: [],          // [{ item, quantity, selectedOptions: [...], lineKey }]
+  activeItem: null,   // item currently open in the picker sheet
+  pickerSelections: {}, // groupId -> [optionId,...]
+  pickerQty: 1,
+  showCartSheet: false,
+  loyalty: null,       // get_loyalty_status() payload
+  otpStage: null,       // null | 'enter-phone' | 'enter-code'
+  phone: '',
+  lastOrder: null,
+  msg: null
+};
+
+const root = document.getElementById('app-root');
+
+async function boot() {
+  const target = parseTarget();
+  if (!target) {
+    state.view = 'error';
+    state.msg = 'No table link found. Scan a table\'s QR code, or open this page with ?cafe=slug&table=CODE for testing.';
+    return render();
+  }
+  state.target = target;
+
+  const { data: { session } } = await sb.auth.getSession();
+
+  const { data, error } = await sb.rpc('resolve_table_link', {
+    p_cafe_slug: target.cafeSlug, p_table_code: target.tableCode
+  });
+  if (error || !data) {
+    state.view = 'error';
+    state.msg = 'This table link looks invalid. Please ask staff for help.';
+    return render();
+  }
+  state.data = data;
+  state.view = 'menu';
+
+  if (session) await refreshLoyalty();
+  render();
+}
+boot();
+
+async function refreshLoyalty() {
+  const { data } = await sb.rpc('get_loyalty_status', { p_cafe_slug: state.target.cafeSlug });
+  state.loyalty = data;
+}
+
+// ---------- Cart helpers ----------
+function priceForOptions(item, groupSelections) {
+  let total = item.base_price;
+  for (const g of item.variant_groups) {
+    for (const optId of (groupSelections[g.id] || [])) {
+      const opt = g.options.find(o => o.id === optId);
+      if (opt) total += Number(opt.price_delta);
+    }
+  }
+  return total;
+}
+function variantsSummary(item, groupSelections) {
+  const parts = [];
+  for (const g of item.variant_groups) {
+    for (const optId of (groupSelections[g.id] || [])) {
+      const opt = g.options.find(o => o.id === optId);
+      if (opt) parts.push(opt.name);
+    }
+  }
+  return parts.join(', ');
+}
+function cartTotal() {
+  return state.cart.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
+}
+function cartCount() {
+  return state.cart.reduce((sum, line) => sum + line.quantity, 0);
+}
+
+// ---------- Item picker sheet ----------
+function openItemPicker(item) {
+  if (item.sold_out) return;
+  state.activeItem = item;
+  state.pickerSelections = {};
+  item.variant_groups.forEach(g => {
+    if (g.selection_type === 'single' && g.required && g.options.length) {
+      state.pickerSelections[g.id] = [g.options.find(o => !o.sold_out)?.id].filter(Boolean);
+    } else {
+      state.pickerSelections[g.id] = [];
+    }
+  });
+  state.pickerQty = 1;
+  render();
+}
+function closeItemPicker() { state.activeItem = null; render(); }
+
+function selectOption(groupId, optionId, selectionType, maxSelect) {
+  const current = state.pickerSelections[groupId] || [];
+  if (selectionType === 'single') {
+    state.pickerSelections[groupId] = [optionId];
+  } else {
+    if (current.includes(optionId)) {
+      state.pickerSelections[groupId] = current.filter(id => id !== optionId);
+    } else {
+      if (maxSelect && current.length >= maxSelect) return;
+      state.pickerSelections[groupId] = [...current, optionId];
+    }
+  }
+  render();
+}
+function changeQty(delta) {
+  state.pickerQty = Math.max(1, state.pickerQty + delta);
+  render();
+}
+function pickerIsValid(item) {
+  for (const g of item.variant_groups) {
+    if (g.required && (state.pickerSelections[g.id] || []).length === 0) return false;
+  }
+  return true;
+}
+function addToCart() {
+  const item = state.activeItem;
+  if (!pickerIsValid(item)) return;
+  const unitPrice = priceForOptions(item, state.pickerSelections);
+  state.cart.push({
+    lineKey: Math.random().toString(36).slice(2),
+    item,
+    quantity: state.pickerQty,
+    selectedOptions: JSON.parse(JSON.stringify(state.pickerSelections)),
+    unitPrice,
+    variantsLabel: variantsSummary(item, state.pickerSelections)
+  });
+  state.activeItem = null;
+  render();
+}
+function removeCartLine(lineKey) {
+  state.cart = state.cart.filter(l => l.lineKey !== lineKey);
+  render();
+}
+
+// ---------- Phone / OTP loyalty sign-in ----------
+function openSignIn() { state.otpStage = 'enter-phone'; state.msg = null; render(); }
+function closeSignIn() { state.otpStage = null; render(); }
+async function sendOtp() {
+  const phone = document.getElementById('phone-input').value.trim();
+  if (!phone.startsWith('+')) return showInlineMsg('Include your country code, e.g. +20…');
+  state.phone = phone;
+  const { error } = await sb.auth.signInWithOtp({ phone });
+  if (error) return showInlineMsg(error.message);
+  state.otpStage = 'enter-code';
+  render();
+}
+async function verifyOtp() {
+  const code = document.getElementById('otp-input').value.trim();
+  const { error } = await sb.auth.verifyOtp({ phone: state.phone, token: code, type: 'sms' });
+  if (error) return showInlineMsg(error.message);
+  state.otpStage = null;
+  await refreshLoyalty();
+  render();
+}
+function showInlineMsg(text) {
+  state.msg = text;
+  render();
+}
+async function signOut() {
+  await sb.auth.signOut();
+  state.loyalty = null;
+  render();
+}
+
+// ---------- Place order ----------
+async function placeOrder() {
+  const items = state.cart.map(l => ({
+    item_id: l.item.id,
+    quantity: l.quantity,
+    option_ids: Object.values(l.selectedOptions).flat()
+  }));
+  const { data, error } = await sb.rpc('place_order', {
+    p_cafe_slug: state.target.cafeSlug,
+    p_table_code: state.target.tableCode,
+    p_items: items,
+    p_notes: null
+  });
+  if (error || data.error) {
+    showInlineMsg((data && data.error) || (error && error.message) || 'Could not place order.');
+    return;
+  }
+  state.lastOrder = data;
+  state.cart = [];
+  state.showCartSheet = false;
+  state.view = 'confirmation';
+  if (state.loyalty && state.loyalty.signed_in) await refreshLoyalty();
+  render();
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+function render() {
+  // Sheets (item picker / cart / OTP) are appended to document.body, outside
+  // #app-root, so clearing root.innerHTML alone doesn't remove them. Without
+  // this, a new overlay stacks on top of old ones instead of replacing them —
+  // which is what made the picker appear "stuck" and never close.
+  document.querySelectorAll('.overlay').forEach(el => el.remove());
+
+  if (state.view === 'error') return renderError();
+  if (state.view === 'confirmation') return renderConfirmation();
+  if (state.view === 'loading') { root.innerHTML = '<div class="center-screen">Loading menu…</div>'; return; }
+  renderMenu();
+}
+
+function renderError() {
+  root.innerHTML = `<div class="center-screen"><div><p style="font-size:16px">${escapeHtml(state.msg)}</p></div></div>`;
+}
+
+function renderConfirmation() {
+  const o = state.lastOrder;
+  root.innerHTML = `
+    <div class="center-screen">
+      <div style="max-width:400px">
+        <div style="font-size:40px;margin-bottom:10px">✓</div>
+        <h2 style="border:none;color:var(--ink);font-size:20px">Order sent!</h2>
+        <p style="color:var(--ink-soft)">Your order has been sent to the kitchen. It'll be brought to your table.</p>
+        <div style="background:#fff;border-radius:10px;padding:16px;margin:18px 0;text-align:left;border:1px solid var(--line)">
+          ${o.reward_applied ? `<div class="cart-total-row reward-row"><span>Reward applied</span><span>-${money(o.reward_discount)} EGP</span></div>` : ''}
+          <div class="cart-total-row grand"><span>Total</span><span>${money(o.total)} EGP</span></div>
+        </div>
+        ${o.estimated_prep_time ? `<p style="color:var(--ink-soft);font-size:13px">Estimated prep time: ~${o.estimated_prep_time} min</p>` : ''}
+        <button class="btn" onclick="startNewOrder()">Order something else</button>
+      </div>
+    </div>
+  `;
+}
+function startNewOrder() { state.view = 'menu'; render(); }
+
+function renderMenu() {
+  const d = state.data;
+  const primary = d.tenant.primary_color || '#2B1D14';
+
+  let html = `
+    <div class="hero" style="background:${escapeAttr(primary)}">
+      <div class="hero-slug">${escapeHtml(d.tenant.name)}</div>
+      <div class="hero-name">Table ${escapeHtml(d.table.display_name || d.table.table_code)}</div>
+      <div class="hero-table">Menu · EGP</div>
+    </div>
+    <div class="wrap">
+  `;
+
+  // Loyalty banner / sign-in strip
+  if (state.loyalty && state.loyalty.signed_in && state.loyalty.loyalty_enabled) {
+    const l = state.loyalty;
+    if (l.type === 'punch') {
+      const pct = Math.min(100, Math.round(((l.order_count % l.punch_threshold) / l.punch_threshold) * 100));
+      const remaining = l.punch_threshold - (l.order_count % l.punch_threshold || l.punch_threshold);
+      html += `
+        <div class="loyalty-banner">
+          <div style="flex:1">
+            <div style="font-size:13px;margin-bottom:6px">${remaining === l.punch_threshold ? 'Reward ready! Order to redeem.' : `${remaining} more order${remaining===1?'':'s'} until: ${escapeHtml(l.reward_description||'a reward')}`}</div>
+            <div class="loyalty-progress-track"><div class="loyalty-progress-fill" style="width:${pct}%"></div></div>
+          </div>
+          <div class="loyalty-text">${l.order_count % l.punch_threshold}/${l.punch_threshold}</div>
+        </div>
+      `;
+    } else if (l.type === 'points') {
+      html += `<div class="loyalty-banner"><div style="flex:1;font-size:13px">You have <strong>${money(l.points_balance)} EGP</strong> in rewards credit</div></div>`;
+    }
+  } else if (!state.loyalty || !state.loyalty.signed_in) {
+    const hasLoyalty = d.loyalty_program != null;
+    html += `
+      <div class="signin-strip">
+        <span>${hasLoyalty ? 'Sign in with your phone to track rewards' : 'Sign in to speed up checkout next time'}</span>
+        <a onclick="openSignIn()">Sign in</a>
+      </div>
+    `;
+  } else {
+    html += `
+      <div class="signin-strip">
+        <span>Signed in</span>
+        <a onclick="signOut()">Sign out</a>
+      </div>
+    `;
+  }
+
+  if (!d.menu || d.menu.length === 0) {
+    html += `<div class="empty">This café hasn't added any menu items yet.</div>`;
+  }
+
+  for (const cat of (d.menu || [])) {
+    html += `<h2>${escapeHtml(cat.category_name)}</h2>`;
+    for (const item of cat.items) {
+      html += `
+        <div class="item ${item.sold_out ? 'sold-out' : ''}" onclick='${item.sold_out ? '' : `openItemPicker(${JSON.stringify(item).replace(/'/g, "&#39;")})`}'>
+          <div class="item-info">
+            <div class="item-title">${escapeHtml(item.name)} ${item.sold_out ? '<span class="sold-out-tag">Sold out</span>' : ''}</div>
+            ${item.description ? `<div class="item-desc">${escapeHtml(item.description)}</div>` : ''}
+          </div>
+          <div class="item-price">${money(item.base_price)} EGP</div>
+        </div>
+      `;
+    }
+  }
+
+  html += `</div>`; // .wrap
+
+  if (state.cart.length > 0) {
+    html += `
+      <div class="cart-bar">
+        <div class="cart-bar-left">${cartCount()} item${cartCount()===1?'':'s'} · ${money(cartTotal())} EGP</div>
+        <button class="cart-bar-btn" onclick="openCartSheet()">View cart</button>
+      </div>
+    `;
+  }
+
+  root.innerHTML = html;
+
+  if (state.activeItem) renderItemSheet();
+  if (state.showCartSheet) renderCartSheet();
+  if (state.otpStage) renderOtpSheet();
+}
+
+function renderItemSheet() {
+  const item = state.activeItem;
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) closeItemPicker(); };
+
+  let groupsHtml = '';
+  for (const g of item.variant_groups) {
+    const selections = state.pickerSelections[g.id] || [];
+    groupsHtml += `
+      <div class="group-title"><span>${escapeHtml(g.name)}</span>${g.required ? '<span class="req-tag">Required</span>' : '<span>Optional</span>'}</div>
+    `;
+    for (const opt of g.options) {
+      const selected = selections.includes(opt.id);
+      groupsHtml += `
+        <div class="option-row ${selected ? 'selected' : ''} ${opt.sold_out ? 'disabled' : ''}"
+             onclick="${opt.sold_out ? '' : `selectOption('${g.id}','${opt.id}','${g.selection_type}',${g.max_select || 'null'})`}">
+          <span class="option-name">${escapeHtml(opt.name)}${opt.sold_out ? ' (sold out)' : ''}</span>
+          <span class="option-delta">${Number(opt.price_delta) > 0 ? '+' : ''}${Number(opt.price_delta) !== 0 ? money(opt.price_delta) + ' EGP' : ''}</span>
+        </div>
+      `;
+    }
+  }
+
+  const unitPrice = priceForOptions(item, state.pickerSelections);
+  const valid = pickerIsValid(item);
+
+  overlay.innerHTML = `
+    <div class="sheet" style="position:relative">
+      <button class="btn-close" onclick="closeItemPicker()">✕</button>
+      <div class="sheet-title">${escapeHtml(item.name)}</div>
+      ${item.description ? `<div class="sheet-desc">${escapeHtml(item.description)}</div>` : ''}
+      ${groupsHtml}
+      <div class="qty-row">
+        <button class="qty-btn" onclick="changeQty(-1)">−</button>
+        <span class="qty-val">${state.pickerQty}</span>
+        <button class="qty-btn" onclick="changeQty(1)">+</button>
+      </div>
+      <button class="btn" ${valid ? '' : 'disabled'} onclick="addToCart()">
+        Add to cart · ${money(unitPrice * state.pickerQty)} EGP
+      </button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function openCartSheet() { state.showCartSheet = true; render(); }
+function closeCartSheet() { state.showCartSheet = false; render(); }
+
+function renderCartSheet() {
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) closeCartSheet(); };
+
+  const linesHtml = state.cart.map(l => `
+    <div class="cart-line">
+      <div class="cart-line-info">
+        <div class="cart-line-name">${l.quantity}× ${escapeHtml(l.item.name)}</div>
+        ${l.variantsLabel ? `<div class="cart-line-variants">${escapeHtml(l.variantsLabel)}</div>` : ''}
+      </div>
+      <div class="item-price">${money(l.unitPrice * l.quantity)} EGP</div>
+      <button class="cart-line-remove" onclick="removeCartLine('${l.lineKey}')">Remove</button>
+    </div>
+  `).join('');
+
+  const willRedeem = state.loyalty && state.loyalty.signed_in && state.loyalty.loyalty_enabled
+    && state.loyalty.type === 'punch'
+    && ((state.loyalty.order_count % state.loyalty.punch_threshold) === state.loyalty.punch_threshold - 1 || state.loyalty.order_count === 0 && state.loyalty.punch_threshold === 1);
+
+  overlay.innerHTML = `
+    <div class="sheet" style="position:relative">
+      <button class="btn-close" onclick="closeCartSheet()">✕</button>
+      <div class="sheet-title">Your order</div>
+      ${state.cart.length === 0 ? '<div class="empty">Your cart is empty</div>' : linesHtml}
+      ${willRedeem ? `<div class="msg ok" style="margin-top:12px">🎉 This order will redeem your reward: ${escapeHtml(state.loyalty.reward_description || '')}</div>` : ''}
+      <div class="cart-total-row grand"><span>Total</span><span>${money(cartTotal())} EGP</span></div>
+      <div id="order-msg"></div>
+      <button class="btn" ${state.cart.length === 0 ? 'disabled' : ''} onclick="placeOrder()" style="margin-top:14px">
+        Send order to kitchen
+      </button>
+      <p style="font-size:11px;color:var(--ink-soft);text-align:center;margin-top:10px">Pay at the counter when your order arrives · card/wallet payment coming soon</p>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  if (state.msg) {
+    document.getElementById('order-msg').innerHTML = `<div class="msg error">${escapeHtml(state.msg)}</div>`;
+    state.msg = null;
+  }
+}
+
+function renderOtpSheet() {
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) closeSignIn(); };
+
+  if (state.otpStage === 'enter-phone') {
+    overlay.innerHTML = `
+      <div class="sheet" style="position:relative">
+        <button class="btn-close" onclick="closeSignIn()">✕</button>
+        <div class="sheet-title">Sign in with phone</div>
+        <div class="sheet-desc">We'll text you a 6-digit code. No password needed.</div>
+        <label>Phone number</label>
+        <input id="phone-input" type="tel" placeholder="+20 1XX XXX XXXX" />
+        <div id="otp-msg"></div>
+        <button class="btn" style="margin-top:16px" onclick="sendOtp()">Send code</button>
+      </div>
+    `;
+  } else {
+    overlay.innerHTML = `
+      <div class="sheet" style="position:relative">
+        <button class="btn-close" onclick="closeSignIn()">✕</button>
+        <div class="sheet-title">Enter the code</div>
+        <div class="sheet-desc">Sent to ${escapeHtml(state.phone)}</div>
+        <input id="otp-input" class="otp-input" maxlength="6" inputmode="numeric" placeholder="······" />
+        <div id="otp-msg"></div>
+        <button class="btn" style="margin-top:16px" onclick="verifyOtp()">Verify</button>
+      </div>
+    `;
+  }
+  document.body.appendChild(overlay);
+  if (state.msg) {
+    document.getElementById('otp-msg').innerHTML = `<div class="msg error">${escapeHtml(state.msg)}</div>`;
+    state.msg = null;
+  }
+}
+
+// ---------- utils ----------
+function money(n) { return Number(n || 0).toFixed(2); }
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>\
