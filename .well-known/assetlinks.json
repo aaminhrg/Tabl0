@@ -3,9 +3,9 @@
     "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
-      "package_name": "REPLACE_WITH_PACKAGE_NAME",
+      "package_name": "com.example.tabl0",
       "sha256_cert_fingerprints": [
-        "REPLACE_WITH_SHA256"
+        "E2:EE:EB:39:B1:C6:AA:A5:95:1A:45:F1:88:19:AE:D5:A3:03:CF:82:0C:BE:01:4B:DF:C2:FE:0B:F4:04:4B:CF"
       ]
     }
   }
