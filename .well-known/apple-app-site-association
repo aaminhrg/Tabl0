@@ -1,11 +1,15 @@
 {
   "applinks": {
-    "apps": [],
     "details": [
       {
-        "appID": "REPLACE_WITH_TEAMID.REPLACE_WITH_BUNDLEID",
-        "paths": ["*"]
+        "appIDs": ["WS8K93QU48.AA.Tabl0", "WS8K93QU48.AA.Tabl0.Clip"],
+        "components": [
+          { "/": "/t/*", "comment": "Table ordering links for any subscribed cafe" }
+        ]
       }
     ]
+  },
+  "appclips": {
+    "apps": ["WS8K93QU48.AA.Tabl0.Clip"]
   }
 }
