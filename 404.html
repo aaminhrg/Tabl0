@@ -80,7 +80,7 @@
   }
   .sheet-title { font-size: 20px; font-weight: bold; margin: 0 0 4px; }
   .sheet-desc { font-size: 13px; color: var(--ink-soft); margin-bottom: 16px; }
-  .group-title { font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); margin: 16px 0 8px; display:flex; justify-content:space-betwe[...]
+  .group-title { font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); margin: 16px 0 8px; display:flex; justify-content:space-between; }
   .req-tag { color: var(--gold); }
   .option-row {
     display:flex; align-items:center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line);
@@ -110,7 +110,7 @@
     box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
   }
   .cart-bar-left { font-family: var(--mono); font-size: 13px; }
-  .cart-bar-btn { background: var(--gold); color: var(--espresso); border:none; border-radius: 8px; padding: 11px 20px; font-weight:bold; font-family: var(--mono); font-size: 13px; cursor:pointer[...]
+  .cart-bar-btn { background: var(--gold); color: var(--espresso); border:none; border-radius: 8px; padding: 11px 20px; font-weight:bold; font-family: var(--mono); font-size: 13px; cursor:pointer; }
 
   .cart-line { display:flex; align-items:center; gap:10px; padding: 10px 0; border-bottom: 1px dashed var(--line); }
   .cart-line-info { flex:1; }
@@ -413,4 +413,201 @@ function renderMenu() {
       html += `
         <div class="loyalty-banner">
           <div style="flex:1">
-            <div style="font-size:13px;margin-bottom:6px">${remaining === l.punch_threshold ? 'Reward ready! Order to redeem.' : `${remaining} more order${remaining===1?'':'s'} until: ${escapeHtm[...]
+            <div style="font-size:13px;margin-bottom:6px">${remaining === l.punch_threshold ? 'Reward ready! Order to redeem.' : `${remaining} more order${remaining===1?'':'s'} until: ${escapeHtml(l.reward_description||'a reward')}`}</div>
+            <div class="loyalty-progress-track"><div class="loyalty-progress-fill" style="width:${pct}%"></div></div>
+          </div>
+          <div class="loyalty-text">${l.order_count % l.punch_threshold}/${l.punch_threshold}</div>
+        </div>
+      `;
+    } else if (l.type === 'points') {
+      html += `<div class="loyalty-banner"><div style="flex:1;font-size:13px">You have <strong>${money(l.points_balance)} EGP</strong> in rewards credit</div></div>`;
+    }
+  } else if (!state.loyalty || !state.loyalty.signed_in) {
+    const hasLoyalty = d.loyalty_program != null;
+    html += `
+      <div class="signin-strip">
+        <span>${hasLoyalty ? 'Sign in with your phone to track rewards' : 'Sign in to speed up checkout next time'}</span>
+        <a onclick="openSignIn()">Sign in</a>
+      </div>
+    `;
+  } else {
+    html += `
+      <div class="signin-strip">
+        <span>Signed in</span>
+        <a onclick="signOut()">Sign out</a>
+      </div>
+    `;
+  }
+
+  if (!d.menu || d.menu.length === 0) {
+    html += `<div class="empty">This café hasn't added any menu items yet.</div>`;
+  }
+
+  for (const cat of (d.menu || [])) {
+    html += `<h2>${escapeHtml(cat.category_name)}</h2>`;
+    for (const item of cat.items) {
+      html += `
+        <div class="item ${item.sold_out ? 'sold-out' : ''}" onclick='${item.sold_out ? '' : `openItemPicker(${JSON.stringify(item).replace(/'/g, "&#39;")})`}'>
+          <div class="item-info">
+            <div class="item-title">${escapeHtml(item.name)} ${item.sold_out ? '<span class="sold-out-tag">Sold out</span>' : ''}</div>
+            ${item.description ? `<div class="item-desc">${escapeHtml(item.description)}</div>` : ''}
+          </div>
+          <div class="item-price">${money(item.base_price)} EGP</div>
+        </div>
+      `;
+    }
+  }
+
+  html += `</div>`; // .wrap
+
+  if (state.cart.length > 0) {
+    html += `
+      <div class="cart-bar">
+        <div class="cart-bar-left">${cartCount()} item${cartCount()===1?'':'s'} · ${money(cartTotal())} EGP</div>
+        <button class="cart-bar-btn" onclick="openCartSheet()">View cart</button>
+      </div>
+    `;
+  }
+
+  root.innerHTML = html;
+
+  if (state.activeItem) renderItemSheet();
+  if (state.showCartSheet) renderCartSheet();
+  if (state.otpStage) renderOtpSheet();
+}
+
+function renderItemSheet() {
+  const item = state.activeItem;
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) closeItemPicker(); };
+
+  let groupsHtml = '';
+  for (const g of item.variant_groups) {
+    const selections = state.pickerSelections[g.id] || [];
+    groupsHtml += `
+      <div class="group-title"><span>${escapeHtml(g.name)}</span>${g.required ? '<span class="req-tag">Required</span>' : '<span>Optional</span>'}</div>
+    `;
+    for (const opt of g.options) {
+      const selected = selections.includes(opt.id);
+      groupsHtml += `
+        <div class="option-row ${selected ? 'selected' : ''} ${opt.sold_out ? 'disabled' : ''}"
+             onclick="${opt.sold_out ? '' : `selectOption('${g.id}','${opt.id}','${g.selection_type}',${g.max_select || 'null'})`}">
+          <span class="option-name">${escapeHtml(opt.name)}${opt.sold_out ? ' (sold out)' : ''}</span>
+          <span class="option-delta">${Number(opt.price_delta) > 0 ? '+' : ''}${Number(opt.price_delta) !== 0 ? money(opt.price_delta) + ' EGP' : ''}</span>
+        </div>
+      `;
+    }
+  }
+
+  const unitPrice = priceForOptions(item, state.pickerSelections);
+  const valid = pickerIsValid(item);
+
+  overlay.innerHTML = `
+    <div class="sheet" style="position:relative">
+      <button class="btn-close" onclick="closeItemPicker()">✕</button>
+      <div class="sheet-title">${escapeHtml(item.name)}</div>
+      ${item.description ? `<div class="sheet-desc">${escapeHtml(item.description)}</div>` : ''}
+      ${groupsHtml}
+      <div class="qty-row">
+        <button class="qty-btn" onclick="changeQty(-1)">−</button>
+        <span class="qty-val">${state.pickerQty}</span>
+        <button class="qty-btn" onclick="changeQty(1)">+</button>
+      </div>
+      <button class="btn" ${valid ? '' : 'disabled'} onclick="addToCart()">
+        Add to cart · ${money(unitPrice * state.pickerQty)} EGP
+      </button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function openCartSheet() { state.showCartSheet = true; render(); }
+function closeCartSheet() { state.showCartSheet = false; render(); }
+
+function renderCartSheet() {
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) closeCartSheet(); };
+
+  const linesHtml = state.cart.map(l => `
+    <div class="cart-line">
+      <div class="cart-line-info">
+        <div class="cart-line-name">${l.quantity}× ${escapeHtml(l.item.name)}</div>
+        ${l.variantsLabel ? `<div class="cart-line-variants">${escapeHtml(l.variantsLabel)}</div>` : ''}
+      </div>
+      <div class="item-price">${money(l.unitPrice * l.quantity)} EGP</div>
+      <button class="cart-line-remove" onclick="removeCartLine('${l.lineKey}')">Remove</button>
+    </div>
+  `).join('');
+
+  const willRedeem = state.loyalty && state.loyalty.signed_in && state.loyalty.loyalty_enabled
+    && state.loyalty.type === 'punch'
+    && ((state.loyalty.order_count % state.loyalty.punch_threshold) === state.loyalty.punch_threshold - 1 || state.loyalty.order_count === 0 && state.loyalty.punch_threshold === 1);
+
+  overlay.innerHTML = `
+    <div class="sheet" style="position:relative">
+      <button class="btn-close" onclick="closeCartSheet()">✕</button>
+      <div class="sheet-title">Your order</div>
+      ${state.cart.length === 0 ? '<div class="empty">Your cart is empty</div>' : linesHtml}
+      ${willRedeem ? `<div class="msg ok" style="margin-top:12px">🎉 This order will redeem your reward: ${escapeHtml(state.loyalty.reward_description || '')}</div>` : ''}
+      <div class="cart-total-row grand"><span>Total</span><span>${money(cartTotal())} EGP</span></div>
+      <div id="order-msg"></div>
+      <button class="btn" ${state.cart.length === 0 ? 'disabled' : ''} onclick="placeOrder()" style="margin-top:14px">
+        Send order to kitchen
+      </button>
+      <p style="font-size:11px;color:var(--ink-soft);text-align:center;margin-top:10px">Pay at the counter when your order arrives · card/wallet payment coming soon</p>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  if (state.msg) {
+    document.getElementById('order-msg').innerHTML = `<div class="msg error">${escapeHtml(state.msg)}</div>`;
+    state.msg = null;
+  }
+}
+
+function renderOtpSheet() {
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) closeSignIn(); };
+
+  if (state.otpStage === 'enter-phone') {
+    overlay.innerHTML = `
+      <div class="sheet" style="position:relative">
+        <button class="btn-close" onclick="closeSignIn()">✕</button>
+        <div class="sheet-title">Sign in with phone</div>
+        <div class="sheet-desc">We'll text you a 6-digit code. No password needed.</div>
+        <label>Phone number</label>
+        <input id="phone-input" type="tel" placeholder="+20 1XX XXX XXXX" />
+        <div id="otp-msg"></div>
+        <button class="btn" style="margin-top:16px" onclick="sendOtp()">Send code</button>
+      </div>
+    `;
+  } else {
+    overlay.innerHTML = `
+      <div class="sheet" style="position:relative">
+        <button class="btn-close" onclick="closeSignIn()">✕</button>
+        <div class="sheet-title">Enter the code</div>
+        <div class="sheet-desc">Sent to ${escapeHtml(state.phone)}</div>
+        <input id="otp-input" class="otp-input" maxlength="6" inputmode="numeric" placeholder="······" />
+        <div id="otp-msg"></div>
+        <button class="btn" style="margin-top:16px" onclick="verifyOtp()">Verify</button>
+      </div>
+    `;
+  }
+  document.body.appendChild(overlay);
+  if (state.msg) {
+    document.getElementById('otp-msg').innerHTML = `<div class="msg error">${escapeHtml(state.msg)}</div>`;
+    state.msg = null;
+  }
+}
+
+// ---------- utils ----------
+function money(n) { return Number(n || 0).toFixed(2); }
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function escapeAttr(s) { return String(s || '').replace(/"/g, ''); }
+</script>
+</body>
+</html>
