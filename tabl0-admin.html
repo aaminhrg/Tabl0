@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Tabl0 Admin</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
@@ -166,7 +167,7 @@ function renderDashboard() {
   topbarRight.innerHTML = `<span class="userline">${escapeHtml(state.user.email)}</span> <button class="btn" onclick="doLogout()" style="margin-left:12px">Sign out</button>`;
   root.innerHTML = `
     <div class="tabs">
-      ${['overview','businesses','support','reports'].map(t => `<div class="tab ${state.tab===t?'active':''}" onclick="switchTab('${t}')">${t}</div>`).join('')}
+      ${['overview','businesses','support','reports','insights'].map(t => `<div class="tab ${state.tab===t?'active':''}" onclick="switchTab('${t}')">${t}</div>`).join('')}
     </div>
     <div id="tab-body"></div>`;
   const body = document.getElementById('tab-body');
@@ -174,6 +175,7 @@ function renderDashboard() {
   if (state.tab === 'businesses') body.innerHTML = state.detailTenant ? renderTenantDetail() : renderBusinesses();
   if (state.tab === 'support') body.innerHTML = renderSupport();
   if (state.tab === 'reports') renderReportsTab();
+  if (state.tab === 'insights') renderInsightsTab();
 }
 async function switchTab(t) {
   state.tab = t; state.detailTenant = null;
@@ -418,6 +420,167 @@ function exportAdminReportPdf() {
   doc.autoTable({ startY: doc.lastAutoTable.finalY+10, head: [['Business','Orders','Revenue']],
     body: stats.byTenant.map(t=>[t.name,t.orders,money(t.revenue)]), theme: 'striped', headStyles: { fillColor: [43,29,20] } });
   doc.save(`Tabl0_Platform_Report_${adminReportState.rangeLabel.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.pdf`);
+}
+
+// ============================================================
+// INSIGHTS — market study: item performance, café comparison,
+// and consumer behavior (variant/preference popularity)
+// ============================================================
+let insightsState = { rangeLabel: 'This Month', start: null, end: null, data: null, loaded: false };
+let chartInstances = {}; // track so we can destroy before re-drawing — Chart.js silently fails to redraw an already-bound canvas otherwise
+
+function setInsightsRange(label) {
+  const now = new Date();
+  let start, end;
+  if (label === 'This Week') { const d = now.getDay(); start = new Date(now.getFullYear(), now.getMonth(), now.getDate()-d); end = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1); }
+  else if (label === 'This Month') { start = new Date(now.getFullYear(), now.getMonth(), 1); end = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1); }
+  else if (label === 'This Year') { start = new Date(now.getFullYear(), 0, 1); end = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1); }
+  else if (label === 'All Time') { start = new Date(2020,0,1); end = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1); }
+  insightsState.rangeLabel = label; insightsState.start = start; insightsState.end = end;
+  generateInsights();
+}
+
+async function generateInsights() {
+  insightsState.loaded = false;
+  renderInsightsTab();
+  const { data } = await sb.rpc('get_admin_market_analytics', {
+    p_start: insightsState.start.toISOString(), p_end: insightsState.end.toISOString()
+  });
+  insightsState.data = data;
+  insightsState.loaded = true;
+  renderInsightsTab();
+}
+
+function destroyChart(id) { if (chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; } }
+
+function renderInsightsTab() {
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+  if (!insightsState.start) { setInsightsRange('This Month'); return; }
+
+  body.innerHTML = `
+    <div class="ticket">
+      <h2>Market study</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${['This Week','This Month','This Year','All Time'].map(l => `<button class="btn btn-sm ${insightsState.rangeLabel===l?'btn-solid':''}" onclick="setInsightsRange('${l}')">${l}</button>`).join('')}
+      </div>
+    </div>
+    ${!insightsState.loaded ? '<div class="ticket"><div class="empty">Crunching numbers…</div></div>' : `
+      <div class="ticket">
+        <div class="nav-actions" style="margin-bottom:0">
+          <h2 style="border:none;margin:0">Café comparison — who's selling more</h2>
+          <div><button class="btn btn-sm" onclick="exportInsightsExcel()">📊 Excel</button> <button class="btn btn-sm" onclick="exportInsightsPdf()">📄 PDF</button></div>
+        </div>
+        ${insightsState.data.tenant_comparison.length === 0 ? '<div class="empty">No orders in this range.</div>' : '<canvas id="chart-tenant-comparison" height="90"></canvas>'}
+      </div>
+
+      <div class="ticket">
+        <h2>Best & worst selling drinks (platform-wide)</h2>
+        ${insightsState.data.items_global.length === 0 ? '<div class="empty">No items sold in this range.</div>' : '<canvas id="chart-items-global" height="110"></canvas>'}
+      </div>
+
+      <div class="stat-grid" style="grid-template-columns:1fr 1fr">
+        <div class="ticket">
+          <h2>Hot vs cold — consumer preference</h2>
+          ${insightsState.data.category_breakdown.length === 0 ? '<div class="empty">No category data.</div>' : '<canvas id="chart-category"></canvas>'}
+        </div>
+        <div class="ticket">
+          <h2>Variant preferences (size, milk, cup type…)</h2>
+          ${insightsState.data.variant_popularity.length === 0 ? '<div class="empty">No variant selections in this range — items without required options do not generate this data.</div>' : '<canvas id="chart-variants"></canvas>'}
+        </div>
+      </div>
+
+      <div class="ticket">
+        <h2>Item performance by café</h2>
+        <table>
+          <thead><tr><th>Café</th><th>Item</th><th>Qty sold</th><th>Revenue</th></tr></thead>
+          <tbody>${insightsState.data.items_by_tenant.sort((a,b)=>b.qty-a.qty).map(i => `<tr><td>${escapeHtml(i.tenant_name)}</td><td>${escapeHtml(i.item_name)}</td><td>${i.qty}</td><td>${money(i.revenue)} EGP</td></tr>`).join('')}</tbody>
+        </table>
+      </div>
+    `}
+  `;
+
+  if (insightsState.loaded) drawInsightsCharts();
+}
+
+function chartColors(n) {
+  const palette = ['#C08A2E','#3D6B4A','#2D6E8C','#A63D2F','#6B5B47','#D9A44C','#2B1D14','#7a9e85'];
+  return Array.from({length:n}, (_,i) => palette[i % palette.length]);
+}
+
+function drawInsightsCharts() {
+  const d = insightsState.data;
+
+  if (d.tenant_comparison.length > 0) {
+    destroyChart('tenant-comparison');
+    chartInstances['tenant-comparison'] = new Chart(document.getElementById('chart-tenant-comparison'), {
+      type: 'bar',
+      data: {
+        labels: d.tenant_comparison.map(t => t.tenant_name),
+        datasets: [
+          { label: 'Revenue (EGP)', data: d.tenant_comparison.map(t => t.revenue), backgroundColor: '#C08A2E', yAxisID: 'y' },
+          { label: 'Order count', data: d.tenant_comparison.map(t => t.order_count), backgroundColor: '#2D6E8C', yAxisID: 'y1' }
+        ]
+      },
+      options: { responsive: true, scales: {
+        y: { position: 'left', title: { display: true, text: 'Revenue (EGP)' } },
+        y1: { position: 'right', title: { display: true, text: 'Orders' }, grid: { drawOnChartArea: false } }
+      }}
+    });
+  }
+
+  if (d.items_global.length > 0) {
+    destroyChart('items-global');
+    const sorted = [...d.items_global].sort((a,b) => b.qty - a.qty);
+    chartInstances['items-global'] = new Chart(document.getElementById('chart-items-global'), {
+      type: 'bar',
+      data: { labels: sorted.map(i => i.item_name), datasets: [{ label: 'Quantity sold', data: sorted.map(i => i.qty), backgroundColor: chartColors(sorted.length) }] },
+      options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } } }
+    });
+  }
+
+  if (d.category_breakdown.length > 0) {
+    destroyChart('category');
+    chartInstances['category'] = new Chart(document.getElementById('chart-category'), {
+      type: 'pie',
+      data: { labels: d.category_breakdown.map(c => c.category_name || 'Uncategorized'), datasets: [{ data: d.category_breakdown.map(c => c.qty), backgroundColor: chartColors(d.category_breakdown.length) }] },
+      options: { responsive: true }
+    });
+  }
+
+  if (d.variant_popularity.length > 0) {
+    destroyChart('variants');
+    chartInstances['variants'] = new Chart(document.getElementById('chart-variants'), {
+      type: 'doughnut',
+      data: { labels: d.variant_popularity.map(v => v.option_name), datasets: [{ data: d.variant_popularity.map(v => v.times_selected), backgroundColor: chartColors(d.variant_popularity.length) }] },
+      options: { responsive: true }
+    });
+  }
+}
+
+function exportInsightsExcel() {
+  const d = insightsState.data;
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Tabl0 Market Study'], ['Range', insightsState.rangeLabel]]), 'Summary');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Café','Orders','Revenue (EGP)'], ...d.tenant_comparison.map(t=>[t.tenant_name,t.order_count,t.revenue.toFixed(2)])]), 'Cafe Comparison');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Item','Qty Sold','Revenue (EGP)','Order Count'], ...d.items_global.map(i=>[i.item_name,i.qty,i.revenue.toFixed(2),i.order_count])]), 'Item Performance');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Café','Item','Qty Sold','Revenue (EGP)'], ...d.items_by_tenant.map(i=>[i.tenant_name,i.item_name,i.qty,i.revenue.toFixed(2)])]), 'Item by Cafe');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Category','Qty Sold','Revenue (EGP)'], ...d.category_breakdown.map(c=>[c.category_name||'Uncategorized',c.qty,c.revenue.toFixed(2)])]), 'Hot vs Cold');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Variant Option','Times Selected'], ...d.variant_popularity.map(v=>[v.option_name,v.times_selected])]), 'Variant Preferences');
+  XLSX.writeFile(wb, `Tabl0_Market_Study_${insightsState.rangeLabel.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+function exportInsightsPdf() {
+  const d = insightsState.data;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(16); doc.text('Tabl0 Market Study', 14, 18);
+  doc.setFontSize(10); doc.text(`Range: ${insightsState.rangeLabel}`, 14, 26);
+  doc.autoTable({ startY: 34, head: [['Café','Orders','Revenue (EGP)']], body: d.tenant_comparison.map(t=>[t.tenant_name,t.order_count,money(t.revenue)]), theme: 'grid', headStyles: { fillColor: [43,29,20] } });
+  doc.autoTable({ startY: doc.lastAutoTable.finalY+10, head: [['Item','Qty Sold','Revenue (EGP)']], body: d.items_global.map(i=>[i.item_name,i.qty,money(i.revenue)]), theme: 'striped', headStyles: { fillColor: [43,29,20] } });
+  doc.autoTable({ startY: doc.lastAutoTable.finalY+10, head: [['Category','Qty Sold']], body: d.category_breakdown.map(c=>[c.category_name||'Uncategorized',c.qty]), theme: 'grid', headStyles: { fillColor: [43,29,20] } });
+  doc.autoTable({ startY: doc.lastAutoTable.finalY+10, head: [['Variant Preference','Times Selected']], body: d.variant_popularity.map(v=>[v.option_name,v.times_selected]), theme: 'striped', headStyles: { fillColor: [43,29,20] } });
+  doc.save(`Tabl0_Market_Study_${insightsState.rangeLabel.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.pdf`);
 }
 </script>
 </body>
