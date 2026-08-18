@@ -377,12 +377,80 @@ async function handleLogin(email, password) {
   state.user = session.user;
   await loadTenant();
 }
-async function handleSignup(email, password) {
+async function handleSignup(email, password, cafeName) {
   const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: `https://${PLATFORM_DOMAIN}/console.html` } });
   if (error) return showMsg('login-msg', error.message, 'error');
-  if (!data.session) return showMsg('login-msg', 'Check your email to confirm your account, then log in.', 'ok');
+  if (!data.session) return showMsg('login-msg', 'Check your email to confirm your account, then sign in.', 'ok');
   state.user = data.session.user;
-  await loadTenant();
+  if (cafeName) {
+    await createTenant(cafeName, '');
+    await sb.rpc('accept_terms', { p_tenant_id: state.tenant.id });
+    state.view = 'plan-selection';
+    render();
+  } else {
+    await loadTenant();
+  }
+}
+
+function renderPlanSelection() {
+  topbarRight.innerHTML = `<span class="userline">${state.user.email}</span><button class="btn" onclick="handleLogout()">Sign out</button>`;
+  root.innerHTML = `
+    <div class="ticket">
+      <div class="eyebrow">Almost there</div>
+      <h1>Choose how you'd like to pay</h1>
+      <p class="lead">Building your menu, tables, and everything in this dashboard is always free. This only applies once you start taking real orders from customers.</p>
+      <div class="grid2">
+        <div class="category-block">
+          <h3 style="font-size:18px">Pay-as-you-go</h3>
+          <div style="font-size:28px;font-weight:bold;margin:8px 0">0.8%<span style="font-size:14px;font-weight:normal;color:var(--ink-soft)"> per order</span></div>
+          <p class="small">No monthly fee. Best if you're just getting started or have lower order volume.</p>
+          <button class="btn btn-solid" style="width:100%;margin-top:14px" onclick="choosePlan('payg')">Choose Pay-as-you-go</button>
+        </div>
+        <div class="category-block" style="border-color:var(--gold)">
+          <h3 style="font-size:18px">Pro</h3>
+          <div style="font-size:28px;font-weight:bold;margin:8px 0">800 EGP<span style="font-size:14px;font-weight:normal;color:var(--ink-soft)">/month</span></div>
+          <p class="small">0% per order — keep 100% of every sale. Best once you're doing steady volume.</p>
+          <button class="btn btn-solid" style="width:100%;margin-top:14px" onclick="choosePlan('pro')">Choose Pro</button>
+        </div>
+      </div>
+      <p class="small" style="margin-top:16px;text-align:center">You can switch plans anytime from Settings.</p>
+    </div>
+  `;
+}
+
+async function choosePlan(plan) {
+  if (plan === 'payg') {
+    await sb.rpc('set_billing_plan', { p_tenant_id: state.tenant.id, p_plan: 'payg' });
+    state.tenant.billing_plan = 'payg';
+    state.tenant.platform_fee_percent = 0.8;
+    state.view = 'wizard';
+    render();
+  } else {
+    await startProCheckout();
+  }
+}
+
+async function switchToPayg() {
+  if (!confirm('Switch to Pay-as-you-go? Your Pro subscription (if active) should be cancelled separately in your Stripe billing portal to avoid being charged again.')) return;
+  await sb.rpc('set_billing_plan', { p_tenant_id: state.tenant.id, p_plan: 'payg' });
+  state.tenant.billing_plan = 'payg';
+  state.tenant.platform_fee_percent = 0.8;
+  render();
+}
+
+async function startProCheckout() {
+  const { data: { session } } = await sb.auth.getSession();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/stripe-subscription-checkout`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tenant_id: state.tenant.id, return_url: window.location.origin + window.location.pathname })
+  });
+  const data = await res.json();
+  if (data.error) {
+    alert('Pro plan checkout isn\'t available yet: ' + data.error + '\n\nYou can continue with Pay-as-you-go for now and switch to Pro later from Settings once it\'s set up.');
+    return;
+  }
+  window.location.href = data.url;
 }
 async function handleLogout() { await sb.auth.signOut(); }
 
@@ -697,6 +765,7 @@ async function cancelOrder(orderId) {
 // ============================================================
 function render() {
   if (state.view === 'login') return renderLogin();
+  if (state.view === 'plan-selection') return renderPlanSelection();
   if (state.view === 'wizard') return renderWizard();
   if (state.view === 'home') return renderHome();
   if (state.view === 'kitchen') return renderKitchen();
@@ -704,60 +773,105 @@ function render() {
   topbarRight.innerHTML = '';
 }
 
+let loginTab = 'signin'; // 'signin' | 'register' | 'kitchen'
+
+function switchLoginTab(tab) {
+  loginTab = tab;
+  render();
+}
+
 function renderLogin() {
   topbarRight.innerHTML = '';
   root.innerHTML = `
     <div class="center-screen">
-      <div class="ticket login-card">
+      <div class="ticket login-card" style="width:420px">
         <div class="eyebrow">Café Console</div>
-        <h1>Sign in</h1>
-        <p class="lead">Manage your menu, tables, and orders.</p>
+        <div class="tabs" style="margin-bottom:22px">
+          <div class="tab ${loginTab==='signin'?'active':''}" onclick="switchLoginTab('signin')">Sign in</div>
+          <div class="tab ${loginTab==='register'?'active':''}" onclick="switchLoginTab('register')">Register your café</div>
+          <div class="tab ${loginTab==='kitchen'?'active':''}" onclick="switchLoginTab('kitchen')">Kitchen staff</div>
+        </div>
         <div id="login-msg" class="msg hidden"></div>
-        <label for="email">Email</label>
-        <input id="email" type="email" placeholder="owner@yourcafe.com" required />
-        <label for="password">Password</label>
-        <input id="password" type="password" placeholder="••••••••" required minlength="6" />
-        <div id="invite-code-row" class="hidden">
-          <label for="invite-code">Kitchen invite code</label>
-          <input id="invite-code" placeholder="e.g. 2023D835" />
-        </div>
-        <div class="nav-actions">
-          <span class="tab-link" onclick="toggleKitchenSignup()" id="kitchen-toggle-link">I have a kitchen invite code</span>
-          <button class="btn btn-solid" onclick="doLogin()">Sign in</button>
-        </div>
-        <div class="nav-actions" style="margin-top:6px">
-          <span class="tab-link" onclick="doSignup()">Create account instead</span>
-          <span></span>
-        </div>
+        <div id="login-tab-body"></div>
       </div>
     </div>
   `;
+  renderLoginTabBody();
 }
-let kitchenSignupMode = false;
-function toggleKitchenSignup() {
-  kitchenSignupMode = !kitchenSignupMode;
-  document.getElementById('invite-code-row').classList.toggle('hidden', !kitchenSignupMode);
-  document.getElementById('kitchen-toggle-link').textContent = kitchenSignupMode
-    ? 'Signing in as café owner instead' : 'I have a kitchen invite code';
-}
-function doLogin() {
-  const email = document.getElementById('email').value.trim();
-  const password = document.getElementById('password').value;
-  if (!email || !password) return showMsg('login-msg', 'Enter both email and password.', 'error');
-  if (kitchenSignupMode) {
-    const code = document.getElementById('invite-code').value.trim();
-    if (!code) return showMsg('login-msg', 'Enter your kitchen invite code.', 'error');
-    handleKitchenLoginOrSignup(email, password, code);
-  } else {
-    handleLogin(email, password);
+
+function renderLoginTabBody() {
+  const body = document.getElementById('login-tab-body');
+  if (loginTab === 'signin') {
+    body.innerHTML = `
+      <h1>Sign in</h1>
+      <p class="lead">For café owners who already have an account.</p>
+      <label for="si-email">Email</label>
+      <input id="si-email" type="email" placeholder="owner@yourcafe.com" required />
+      <label for="si-password">Password</label>
+      <input id="si-password" type="password" placeholder="••••••••" required minlength="6" />
+      <button class="btn btn-solid" style="width:100%;margin-top:18px" onclick="doSignIn()">Sign in</button>
+    `;
+  } else if (loginTab === 'register') {
+    body.innerHTML = `
+      <h1>Register your café</h1>
+      <p class="lead">Takes about 10 minutes — you'll set up your account here, then build your menu and tables next.</p>
+      <label for="reg-name">Café name</label>
+      <input id="reg-name" placeholder="Blue Bean Café" required />
+      <label for="reg-email">Your email</label>
+      <input id="reg-email" type="email" placeholder="owner@yourcafe.com" required />
+      <label for="reg-password">Password</label>
+      <input id="reg-password" type="password" placeholder="••••••••" required minlength="6" />
+      <label for="reg-password-confirm">Confirm password</label>
+      <input id="reg-password-confirm" type="password" placeholder="••••••••" required minlength="6" />
+      <div class="checkline" style="margin-top:16px">
+        <input type="checkbox" id="reg-terms" />
+        <label for="reg-terms" style="margin:0;display:inline">I agree to the <a href="terms.html" target="_blank" style="color:var(--gold)">Terms of Service</a> and <a href="privacy.html" target="_blank" style="color:var(--gold)">Privacy Policy</a></label>
+      </div>
+      <button class="btn btn-solid" style="width:100%;margin-top:18px" onclick="doRegisterBusiness()">Create my café account</button>
+    `;
+  } else if (loginTab === 'kitchen') {
+    body.innerHTML = `
+      <h1>Kitchen staff</h1>
+      <p class="lead">Ask your café owner for your invite code — it's in their Settings tab. You'll get a live order queue with sound alerts, nothing else.</p>
+      <label for="k-email">Email</label>
+      <input id="k-email" type="email" placeholder="you@example.com" required />
+      <label for="k-password">Password</label>
+      <input id="k-password" type="password" placeholder="••••••••" required minlength="6" />
+      <label for="k-code">Kitchen invite code</label>
+      <input id="k-code" placeholder="e.g. 2023D835" required />
+      <button class="btn btn-solid" style="width:100%;margin-top:18px" onclick="doKitchenJoin()">Join kitchen</button>
+    `;
   }
 }
-function doSignup() {
-  const email = document.getElementById('email').value.trim();
-  const password = document.getElementById('password').value;
-  if (!email || !password) return showMsg('login-msg', 'Enter both email and password to create an account.', 'error');
+
+function doSignIn() {
+  const email = document.getElementById('si-email').value.trim();
+  const password = document.getElementById('si-password').value;
+  if (!email || !password) return showMsg('login-msg', 'Enter both email and password.', 'error');
+  handleLogin(email, password);
+}
+
+function doRegisterBusiness() {
+  const name = document.getElementById('reg-name').value.trim();
+  const email = document.getElementById('reg-email').value.trim();
+  const password = document.getElementById('reg-password').value;
+  const confirm = document.getElementById('reg-password-confirm').value;
+  const termsAccepted = document.getElementById('reg-terms').checked;
+  if (!name) return showMsg('login-msg', 'Enter your café\'s name.', 'error');
+  if (!email || !password) return showMsg('login-msg', 'Enter both email and password.', 'error');
   if (password.length < 6) return showMsg('login-msg', 'Password must be at least 6 characters.', 'error');
-  handleSignup(email, password);
+  if (password !== confirm) return showMsg('login-msg', 'Passwords don\'t match.', 'error');
+  if (!termsAccepted) return showMsg('login-msg', 'You need to accept the Terms of Service and Privacy Policy to continue.', 'error');
+  handleSignup(email, password, name);
+}
+
+function doKitchenJoin() {
+  const email = document.getElementById('k-email').value.trim();
+  const password = document.getElementById('k-password').value;
+  const code = document.getElementById('k-code').value.trim();
+  if (!email || !password) return showMsg('login-msg', 'Enter both email and password.', 'error');
+  if (!code) return showMsg('login-msg', 'Enter your kitchen invite code.', 'error');
+  handleKitchenLoginOrSignup(email, password, code);
 }
 
 // Kitchen staff: try sign-in first (existing account), fall back to sign-up,
@@ -771,7 +885,7 @@ async function handleKitchenLoginOrSignup(email, password, code) {
     const signUpResult = await sb.auth.signUp({ email, password, options: { emailRedirectTo: `https://${PLATFORM_DOMAIN}/console.html` } });
     if (signUpResult.error) return showMsg('login-msg', signUpResult.error.message, 'error');
     if (!signUpResult.data.session) {
-      return showMsg('login-msg', 'Check your email to confirm your account, then sign in again with your invite code.', 'ok');
+      return showMsg('login-msg', 'Check your email to confirm your account, then join again with your invite code.', 'ok');
     }
     session = signUpResult.data.session;
   }
@@ -906,7 +1020,7 @@ function renderHome() {
   topbarRight.innerHTML = `<span class="userline">${escapeHtml(state.tenant.name)} · ${state.user.email}</span><button class="btn" onclick="handleLogout()">Sign out</button>`;
   root.innerHTML = `
     <div class="tabs">
-      ${['orders','menu','tables','loyalty','reports','settings','support'].map(t => `
+      ${['orders','menu','tables','loyalty','reports','billing','settings','support'].map(t => `
         <div class="tab ${state.homeTab === t ? 'active' : ''}" onclick="switchTab('${t}')">${t}</div>
       `).join('')}
     </div>
@@ -919,6 +1033,7 @@ function renderHome() {
   if (state.homeTab === 'loyalty') body.innerHTML = renderLoyaltyTab();
   if (state.homeTab === 'settings') body.innerHTML = renderSettingsTab();
   if (state.homeTab === 'reports') renderReportsTab();
+  if (state.homeTab === 'billing') { renderBillingTab(); loadBillingSummary(); }
   if (state.homeTab === 'support') { renderSupportTab(); loadMyTickets(); }
   if (state.homeTab === 'tables') state.tables.forEach(renderQr);
 }
@@ -1209,6 +1324,69 @@ function exportReportPdf() {
   });
 
   doc.save(`Tabl0_Report_${state.tenant.slug}_${reportState.rangeLabel.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.pdf`);
+}
+
+// ============================================================
+// BILLING — plan management + estimated amount due, computed live from real orders
+// ============================================================
+let billingSummary = null;
+async function loadBillingSummary() {
+  const now = new Date();
+  const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const { data } = await sb.rpc('get_billing_summary', {
+    p_tenant_id: state.tenant.id,
+    p_period_start: periodStart.toISOString(),
+    p_period_end: periodEnd.toISOString()
+  });
+  billingSummary = data;
+  renderBillingTab();
+}
+
+function renderBillingTab() {
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+  const t = state.tenant;
+  const plan = t.billing_plan || 'payg';
+
+  body.innerHTML = `
+    <div class="ticket">
+      <h2>Current plan</h2>
+      <div class="grid2">
+        <div class="category-block" style="${plan==='payg' ? 'border-color:var(--gold)' : ''}">
+          <h3 style="font-size:16px">Pay-as-you-go ${plan==='payg' ? '<span class="pill ok">Current</span>' : ''}</h3>
+          <div style="font-size:22px;font-weight:bold;margin:6px 0">0.8%<span style="font-size:13px;font-weight:normal;color:var(--ink-soft)"> per order</span></div>
+          <p class="small">No monthly fee.</p>
+          ${plan!=='payg' ? '<button class="btn btn-sm" onclick="switchToPayg()">Switch to this plan</button>' : ''}
+        </div>
+        <div class="category-block" style="${plan==='pro' ? 'border-color:var(--gold)' : ''}">
+          <h3 style="font-size:16px">Pro ${plan==='pro' ? `<span class="pill ${t.subscription_status==='active'?'ok':'warn'}">${escapeHtml(t.subscription_status)}</span>` : ''}</h3>
+          <div style="font-size:22px;font-weight:bold;margin:6px 0">800 EGP<span style="font-size:13px;font-weight:normal;color:var(--ink-soft)">/month</span></div>
+          <p class="small">0% per order.</p>
+          ${plan!=='pro' ? '<button class="btn btn-sm" onclick="startProCheckout()">Switch to this plan</button>' : ''}
+        </div>
+      </div>
+    </div>
+
+    ${plan === 'payg' ? `
+      <div class="ticket">
+        <h2>This month</h2>
+        ${!billingSummary ? '<div class="empty">Calculating…</div>' : `
+          <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
+            <div class="stat-card"><div class="stat-num">${money(billingSummary.gross_sales)}</div><div class="stat-label">Gross sales (EGP)</div></div>
+            <div class="stat-card"><div class="stat-num">${billingSummary.order_count}</div><div class="stat-label">Orders</div></div>
+            <div class="stat-card"><div class="stat-num" style="color:var(--gold)">${money(billingSummary.estimated_due)}</div><div class="stat-label">Estimated amount due (EGP)</div></div>
+          </div>
+          <p class="small" style="margin-top:14px">This is a live estimate at your current rate (0.8%) — it isn't an invoice. Automated fee collection isn't active yet; this will be deducted automatically from order payments once card/wallet payments are fully live.</p>
+        `}
+      </div>
+    ` : `
+      <div class="ticket">
+        <h2>Subscription</h2>
+        <p class="lead">You're on Pro — 0% per order, no per-order fee calculation needed. Your subscription is billed directly by Stripe.</p>
+      </div>
+    `}
+  `;
 }
 
 function renderSupportTab() {
