@@ -1,0 +1,1066 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Café Console</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root {
+    --espresso: #2B1D14;
+    --espresso-2: #3D2B1F;
+    --crema: #F2E9DC;
+    --paper: #FAF6EF;
+    --gold: #C08A2E;
+    --gold-bright: #D9A44C;
+    --line: #C9B8A0;
+    --ink: #2B1D14;
+    --ink-soft: #6B5B47;
+    --error: #A63D2F;
+    --ok: #3D6B4A;
+    --info: #2D6E8C;
+    --radius: 3px;
+    --mono: 'Courier New', Courier, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--espresso);
+    color: var(--ink);
+    font-family: Georgia, 'Times New Roman', serif;
+    min-height: 100vh;
+  }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 28px; background: var(--espresso-2); border-bottom: 2px solid var(--gold);
+  }
+  .brand { color: var(--crema); font-size: 20px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .brand span { color: var(--gold-bright); }
+  .topbar-right { display:flex; align-items:center; gap:14px; }
+  .userline { color: var(--line); font-family: var(--mono); font-size: 12px; }
+  .btn {
+    font-family: var(--mono); font-size: 13px; letter-spacing: 0.03em;
+    padding: 9px 16px; border: 1px solid var(--gold); background: transparent;
+    color: var(--gold-bright); cursor: pointer; border-radius: var(--radius); transition: background .15s;
+  }
+  .btn:hover { background: rgba(192,138,46,0.15); }
+  .btn-solid { background: var(--gold); color: var(--espresso); border: 1px solid var(--gold); font-weight: bold; }
+  .btn-solid:hover { background: var(--gold-bright); }
+  .btn-danger { border-color: var(--error); color: var(--error); }
+  .btn-danger:hover { background: rgba(166,61,47,0.12); }
+  .btn-sm { padding: 5px 10px; font-size: 11px; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .icon-btn { background:none; border:none; cursor:pointer; color: var(--ink-soft); font-family: var(--mono); font-size: 13px; padding: 4px 8px; }
+  .icon-btn:hover { color: var(--error); }
+
+  .wrap { max-width: 920px; margin: 0 auto; padding: 32px 24px 80px; }
+
+  .ticket {
+    background: var(--paper); border-radius: var(--radius); position: relative;
+    padding: 30px 34px; margin-bottom: 22px; box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  }
+  .ticket::before, .ticket::after {
+    content: ""; position: absolute; left: 0; right: 0; height: 12px;
+    background-image: radial-gradient(circle, var(--espresso) 5px, transparent 5.5px);
+    background-size: 20px 20px; background-position: 0 0;
+  }
+  .ticket::before { top: -6px; }
+  .ticket::after { bottom: -6px; }
+
+  h1 { font-size: 25px; margin: 0 0 4px; }
+  h2 { font-size: 16px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft); margin: 0 0 16px; border-bottom: 1px dashed var(--line); padding-bottom: 10px; }
+  h3 { font-size: 14px; margin: 0 0 8px; color: var(--ink); }
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--gold); margin-bottom: 6px; }
+  p.lead { color: var(--ink-soft); margin: 0 0 20px; }
+
+  label { display:block; font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; color: var(--ink-soft); margin: 12px 0 5px; }
+  input, textarea, select {
+    width: 100%; font-family: Georgia, serif; font-size: 14px; padding: 9px 11px;
+    border: 1px solid var(--line); border-radius: var(--radius); background: #fff; color: var(--ink);
+  }
+  input:focus, textarea:focus, select:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
+  .row { display: flex; gap: 14px; align-items: flex-end; }
+  .row > div { flex: 1; }
+  .checkline { display:flex; align-items:center; gap:8px; margin: 12px 0; font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+  .checkline input { width: auto; }
+
+  .tabs { display:flex; gap: 4px; margin-bottom: 22px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .tab {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 10px 16px; cursor: pointer; color: var(--ink-soft); border-bottom: 2px solid transparent;
+  }
+  .tab.active { color: var(--espresso); border-bottom-color: var(--gold); font-weight: bold; }
+  .tab:hover { color: var(--espresso); }
+
+  .stepper { display:flex; gap:6px; margin-bottom: 26px; }
+  .step-dot { flex:1; height: 4px; background: rgba(0,0,0,0.1); border-radius: 2px; overflow:hidden; }
+  .step-dot.done, .step-dot.active { background: var(--gold); }
+
+  .category-block { border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; background: #fff; }
+  .category-head { display:flex; align-items:center; justify-content:space-between; margin-bottom: 10px; }
+  .category-title-edit { display:flex; gap:8px; align-items:center; flex:1; }
+  .category-title-edit input { font-weight: bold; font-size: 15px; }
+
+  .item-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin-top: 10px; background: var(--crema); }
+  .item-head { display:flex; align-items:center; gap:10px; }
+  .item-head .item-name { flex:1; font-weight: bold; }
+  .item-price { font-family: var(--mono); color: var(--ink-soft); white-space: nowrap; }
+  .item-meta { display:flex; gap:8px; align-items:center; }
+  .item-detail { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+
+  .pill { font-family: var(--mono); font-size: 10px; padding: 2px 8px; border-radius: 12px; background: rgba(61,107,74,0.12); color: var(--ok); text-transform: uppercase; }
+  .pill.warn { background: rgba(166,61,47,0.12); color: var(--error); }
+  .pill.muted { background: rgba(107,91,71,0.1); color: var(--ink-soft); }
+
+  .variant-group { border: 1px dashed var(--line); border-radius: var(--radius); padding: 10px 12px; margin-top: 8px; background: #fff; }
+  .variant-group-head { display:flex; align-items:center; gap:8px; margin-bottom: 8px; }
+  .variant-option-row { display:flex; align-items:center; gap:8px; padding: 5px 0; }
+  .variant-option-row .item-name { flex:1; font-size: 13px; }
+  .variant-add-row { display:flex; gap:8px; margin-top: 8px; }
+  .variant-add-row input, .variant-add-row select { font-size: 13px; padding: 6px 8px; }
+
+  .qr-box { text-align:center; padding: 16px; background:#fff; border-radius: var(--radius); border:1px solid var(--line); position: relative; }
+  .qr-box canvas, .qr-box img { display:block; margin: 0 auto; }
+  .qr-caption { font-family: var(--mono); font-size: 10px; color: var(--ink-soft); margin-top: 8px; word-break: break-all; }
+  .qr-delete { position:absolute; top:6px; right:6px; }
+
+  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } .row { flex-direction: column; align-items: stretch; } }
+
+  .empty { padding: 36px 20px; text-align:center; color: var(--ink-soft); font-style: italic; border: 1px dashed var(--line); border-radius: var(--radius); }
+  .msg { font-family: var(--mono); font-size: 13px; padding: 10px 14px; border-radius: var(--radius); margin-bottom: 16px; }
+  .msg.error { background: rgba(166,61,47,0.1); color: var(--error); border:1px solid rgba(166,61,47,0.3); }
+  .msg.ok { background: rgba(61,107,74,0.1); color: var(--ok); border:1px solid rgba(61,107,74,0.3); }
+
+  .status-badge { display:inline-block; font-family: var(--mono); font-size: 11px; padding: 3px 10px; border-radius: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .status-pending { background: rgba(192,138,46,0.15); color: var(--gold); }
+  .status-preparing { background: rgba(61,107,74,0.15); color: var(--ok); }
+  .status-ready { background: rgba(45,110,140,0.15); color: var(--info); }
+  .status-served { background: rgba(107,91,71,0.15); color: var(--ink-soft); }
+
+  .center-screen { min-height: 80vh; display:flex; align-items:center; justify-content:center; }
+  .login-card { width: 360px; }
+  .tab-link { color: var(--gold-bright); font-family: var(--mono); font-size: 12px; cursor: pointer; text-decoration: underline; }
+  .hidden { display:none !important; }
+  .nav-actions { display:flex; justify-content: space-between; margin-top: 24px; }
+  .small { font-size: 12px; color: var(--ink-soft); font-family: var(--mono); }
+  .divider { border: none; border-top: 1px dashed var(--line); margin: 18px 0; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">Café <span>Console</span></div>
+  <div class="topbar-right" id="topbar-right"></div>
+</div>
+
+<div class="wrap" id="app-root"></div>
+
+<script>
+// ===== Configuration: your live Supabase project =====
+const SUPABASE_URL = 'https://yhrhqfqdxtgifahvkrnw.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_N91RJWdVtL5LgpB7u5uLAA_3NcHqYtt';
+const PLATFORM_DOMAIN = 'tabl0.com';
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let state = {
+  user: null,
+  tenant: null,
+  step: 1,
+  view: 'loading',
+  homeTab: 'orders',
+  categories: [],
+  items: [],
+  variantGroups: [],
+  variantOptions: [],
+  tables: [],
+  loyalty: null,
+  orders: [],
+  orderItems: [],
+  expandedItemId: null,
+  copySourceItemId: {} // itemId -> chosen source item id for "copy variants"
+};
+
+const root = document.getElementById('app-root');
+const topbarRight = document.getElementById('topbar-right');
+
+// ---------- Boot ----------
+async function boot() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) {
+    state.user = session.user;
+    await loadTenant();
+  } else {
+    state.view = 'login';
+    render();
+  }
+}
+boot();
+
+sb.auth.onAuthStateChange((event) => {
+  if (event === 'SIGNED_OUT') {
+    state = { ...state, user: null, tenant: null, view: 'login' };
+    render();
+  }
+});
+
+async function loadTenant() {
+  const { data, error } = await sb.from('tenants').select('*').eq('owner_user_id', state.user.id).maybeSingle();
+  if (error) console.error(error);
+  if (data) {
+    state.tenant = data;
+    state.view = 'home';
+    await loadAll();
+    subscribeOrders();
+  } else {
+    state.view = 'wizard';
+    state.step = 1;
+  }
+  render();
+}
+
+async function loadAll() {
+  await Promise.all([loadMenu(), loadTables(), loadLoyalty(), loadOrders()]);
+}
+
+async function loadMenu() {
+  const tid = state.tenant.id;
+  const [{ data: cats }, { data: items }, { data: groups }, { data: options }] = await Promise.all([
+    sb.from('menu_categories').select('*').eq('tenant_id', tid).order('sort_order'),
+    sb.from('menu_items').select('*').eq('tenant_id', tid).order('sort_order'),
+    sb.from('menu_item_variant_groups').select('*').eq('tenant_id', tid).order('sort_order'),
+    sb.from('menu_item_variant_options').select('*').eq('tenant_id', tid).order('sort_order'),
+  ]);
+  state.categories = cats || [];
+  state.items = items || [];
+  state.variantGroups = groups || [];
+  state.variantOptions = options || [];
+}
+
+async function loadTables() {
+  const { data } = await sb.from('tables').select('*').eq('tenant_id', state.tenant.id).order('table_code');
+  state.tables = data || [];
+}
+
+async function loadLoyalty() {
+  const { data } = await sb.from('loyalty_programs').select('*').eq('tenant_id', state.tenant.id).maybeSingle();
+  state.loyalty = data;
+}
+
+async function loadOrders() {
+  const { data } = await sb.from('orders').select('*').eq('tenant_id', state.tenant.id).order('created_at', { ascending: false }).limit(30);
+  state.orders = data || [];
+
+  if (state.orders.length > 0) {
+    const orderIds = state.orders.map(o => o.id);
+    const { data: items } = await sb.from('order_items').select('*').in('order_id', orderIds);
+    state.orderItems = items || [];
+  } else {
+    state.orderItems = [];
+  }
+}
+
+function subscribeOrders() {
+  sb.channel('orders-' + state.tenant.id)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `tenant_id=eq.${state.tenant.id}` }, () => {
+      loadOrders().then(render);
+    })
+    .subscribe();
+}
+
+// ---------- Auth ----------
+async function handleLogin(email, password) {
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) return showMsg('login-msg', error.message, 'error');
+  const { data: { session } } = await sb.auth.getSession();
+  state.user = session.user;
+  await loadTenant();
+}
+async function handleSignup(email, password) {
+  const { data, error } = await sb.auth.signUp({ email, password });
+  if (error) return showMsg('login-msg', error.message, 'error');
+  if (!data.session) return showMsg('login-msg', 'Check your email to confirm your account, then log in.', 'ok');
+  state.user = data.session.user;
+  await loadTenant();
+}
+async function handleLogout() { await sb.auth.signOut(); }
+
+function showMsg(id, text, kind) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'msg ' + kind;
+  el.classList.remove('hidden');
+}
+function slugify(s) { return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''); }
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function money(n) { return Number(n || 0).toFixed(2); }
+
+// ============================================================
+// WIZARD (first-time setup only — full editing lives in the tabs below)
+// ============================================================
+async function createTenant(name, address) {
+  const slug = slugify(name) + '-' + Math.random().toString(36).slice(2, 6);
+  const { data, error } = await sb.from('tenants').insert({
+    owner_user_id: state.user.id, slug, name, address, currency: 'EGP'
+  }).select().single();
+  if (error) return showMsg('wizard-msg', error.message, 'error');
+  state.tenant = data;
+  state.step = 2;
+  render();
+}
+async function addCategory(name) {
+  const { data, error } = await sb.from('menu_categories').insert({
+    tenant_id: state.tenant.id, name, sort_order: state.categories.length + 1
+  }).select().single();
+  if (error) return showMsg('wizard-msg', error.message, 'error');
+  state.categories.push(data);
+  render();
+}
+async function addItem(categoryId, name, price) {
+  const { data, error } = await sb.from('menu_items').insert({
+    tenant_id: state.tenant.id, category_id: categoryId, name, base_price: parseFloat(price),
+    sort_order: state.items.length + 1
+  }).select().single();
+  if (error) return showMsg('wizard-msg', error.message, 'error');
+  state.items.push(data);
+  render();
+}
+async function addTable(code, displayName) {
+  const { data, error } = await sb.from('tables').insert({
+    tenant_id: state.tenant.id, table_code: code, display_name: displayName
+  }).select().single();
+  if (error) return showMsg('wizard-msg', error.message, 'error');
+  state.tables.push(data);
+  render();
+  setTimeout(() => renderQr(data), 50);
+}
+async function saveLoyalty(active, type, threshold, rewardDesc, rewardValue) {
+  const payload = {
+    tenant_id: state.tenant.id, active, type,
+    punch_threshold: type === 'punch' ? parseInt(threshold) : null,
+    points_percent: type === 'points' ? parseFloat(threshold) : null,
+    reward_description: rewardDesc,
+    reward_value: rewardValue ? parseFloat(rewardValue) : null
+  };
+  const { data, error } = await sb.from('loyalty_programs').upsert(payload, { onConflict: 'tenant_id' }).select().single();
+  if (error) { showMsg('wizard-msg', error.message, 'error'); showMsg('loyalty-msg', error.message, 'error'); return; }
+  state.loyalty = data;
+  render();
+}
+function finishWizard() { state.view = 'home'; state.homeTab = 'menu'; render(); }
+function wizStep1() {
+  const name = document.getElementById('w-name').value.trim();
+  const address = document.getElementById('w-address').value.trim();
+  if (!name) return showMsg('wizard-msg', 'Café name is required.', 'error');
+  createTenant(name, address);
+}
+function wizAddCategory() {
+  const name = document.getElementById('w-cat-name').value.trim();
+  if (!name) return;
+  addCategory(name);
+}
+function wizAddItem(catId) {
+  const name = document.getElementById('w-item-name-' + catId).value.trim();
+  const price = document.getElementById('w-item-price-' + catId).value.trim();
+  if (!name || !price) return showMsg('wizard-msg', 'Item name and price are both required.', 'error');
+  addItem(catId, name, price);
+}
+function wizStep2() { state.step = 3; render(); }
+function wizAddTable() {
+  const code = document.getElementById('w-table-code').value.trim();
+  const name = document.getElementById('w-table-name').value.trim();
+  if (!code) return showMsg('wizard-msg', 'Table code is required.', 'error');
+  addTable(code, name);
+}
+function wizStep3() { state.step = 4; render(); }
+function wizBack() { state.step = Math.max(1, state.step - 1); render(); }
+function wizFinish() {
+  const active = document.getElementById('w-loy-active').checked;
+  const type = document.getElementById('w-loy-type').value;
+  const threshold = document.getElementById('w-loy-threshold').value;
+  const desc = document.getElementById('w-loy-desc').value;
+  const value = document.getElementById('w-loy-value').value;
+  saveLoyalty(active, type, threshold, desc, value).then(finishWizard);
+}
+
+// ============================================================
+// MENU MANAGEMENT (full CRUD, always editable)
+// ============================================================
+async function updateCategory(id, fields) {
+  const { data, error } = await sb.from('menu_categories').update(fields).eq('id', id).select().single();
+  if (error) return showMsg('menu-msg', error.message, 'error');
+  state.categories = state.categories.map(c => c.id === id ? data : c);
+  render();
+}
+async function deleteCategory(id) {
+  if (!confirm('Delete this category? Items inside it will remain but become uncategorized.')) return;
+  const { error } = await sb.from('menu_categories').delete().eq('id', id);
+  if (error) return showMsg('menu-msg', error.message, 'error');
+  state.categories = state.categories.filter(c => c.id !== id);
+  render();
+}
+async function addCategoryLive(name) {
+  if (!name.trim()) return;
+  const { data, error } = await sb.from('menu_categories').insert({
+    tenant_id: state.tenant.id, name: name.trim(), sort_order: state.categories.length + 1
+  }).select().single();
+  if (error) return showMsg('menu-msg', error.message, 'error');
+  state.categories.push(data);
+  render();
+}
+async function addItemLive(categoryId, name, price) {
+  if (!name.trim() || !price) return showMsg('menu-msg', 'Item name and price are required.', 'error');
+  const { data, error } = await sb.from('menu_items').insert({
+    tenant_id: state.tenant.id, category_id: categoryId, name: name.trim(), base_price: parseFloat(price),
+    sort_order: state.items.filter(i => i.category_id === categoryId).length + 1
+  }).select().single();
+  if (error) return showMsg('menu-msg', error.message, 'error');
+  state.items.push(data);
+  render();
+}
+async function updateItem(id, fields) {
+  const { data, error } = await sb.from('menu_items').update(fields).eq('id', id).select().single();
+  if (error) return showMsg('menu-msg', error.message, 'error');
+  state.items = state.items.map(i => i.id === id ? data : i);
+  render();
+}
+async function deleteItem(id) {
+  if (!confirm('Delete this item and all its variants?')) return;
+  const { error } = await sb.from('menu_items').delete().eq('id', id);
+  if (error) return showMsg('menu-msg', error.message, 'error');
+  state.items = state.items.filter(i => i.id !== id);
+  state.variantGroups = state.variantGroups.filter(g => g.menu_item_id !== id);
+  render();
+}
+function toggleItemDetail(id) {
+  state.expandedItemId = state.expandedItemId === id ? null : id;
+  render();
+}
+function saveItemEdits(id) {
+  const name = document.getElementById('edit-name-' + id).value.trim();
+  const desc = document.getElementById('edit-desc-' + id).value.trim();
+  const price = document.getElementById('edit-price-' + id).value;
+  const photo = document.getElementById('edit-photo-' + id).value.trim();
+  const prep = document.getElementById('edit-prep-' + id).value.trim();
+  if (!name || !price) return showMsg('menu-msg', 'Name and price are required.', 'error');
+  updateItem(id, {
+    name, description: desc || null, base_price: parseFloat(price), photo_url: photo || null,
+    prep_time_minutes: prep ? parseInt(prep) : null
+  });
+}
+function toggleSoldOut(id, current) {
+  updateItem(id, { sold_out: !current });
+}
+
+// ----- Variant groups -----
+async function addVariantGroup(itemId, name, selectionType, required) {
+  if (!name.trim()) return;
+  const { data, error } = await sb.from('menu_item_variant_groups').insert({
+    tenant_id: state.tenant.id, menu_item_id: itemId, name: name.trim(),
+    selection_type: selectionType, required,
+    min_select: required ? 1 : 0,
+    max_select: selectionType === 'single' ? 1 : null,
+    sort_order: state.variantGroups.filter(g => g.menu_item_id === itemId).length + 1
+  }).select().single();
+  if (error) return showMsg('menu-msg', error.message, 'error');
+  state.variantGroups.push(data);
+  render();
+}
+async function deleteVariantGroup(id) {
+  if (!confirm('Delete this variant group and all its options?')) return;
+  const { error } = await sb.from('menu_item_variant_groups').delete().eq('id', id);
+  if (error) return showMsg('menu-msg', error.message, 'error');
+  state.variantGroups = state.variantGroups.filter(g => g.id !== id);
+  state.variantOptions = state.variantOptions.filter(o => o.variant_group_id !== id);
+  render();
+}
+async function updateVariantGroupRequired(id, required) {
+  const { data, error } = await sb.from('menu_item_variant_groups').update({ required, min_select: required ? 1 : 0 }).eq('id', id).select().single();
+  if (error) return showMsg('menu-msg', error.message, 'error');
+  state.variantGroups = state.variantGroups.map(g => g.id === id ? data : g);
+  render();
+}
+
+// ----- Variant options -----
+async function addVariantOption(groupId, name, priceDelta) {
+  if (!name.trim()) return;
+  const { data, error } = await sb.from('menu_item_variant_options').insert({
+    tenant_id: state.tenant.id, variant_group_id: groupId, name: name.trim(),
+    price_delta: parseFloat(priceDelta || 0),
+    sort_order: state.variantOptions.filter(o => o.variant_group_id === groupId).length + 1
+  }).select().single();
+  if (error) return showMsg('menu-msg', error.message, 'error');
+  state.variantOptions.push(data);
+  render();
+}
+async function deleteVariantOption(id) {
+  const { error } = await sb.from('menu_item_variant_options').delete().eq('id', id);
+  if (error) return showMsg('menu-msg', error.message, 'error');
+  state.variantOptions = state.variantOptions.filter(o => o.id !== id);
+  render();
+}
+async function toggleOptionSoldOut(id, current) {
+  const { data, error } = await sb.from('menu_item_variant_options').update({ sold_out: !current }).eq('id', id).select().single();
+  if (error) return showMsg('menu-msg', error.message, 'error');
+  state.variantOptions = state.variantOptions.map(o => o.id === id ? data : o);
+  render();
+}
+
+// ----- Copy variants from another item (avoids re-typing Size/Milk on every drink) -----
+async function copyVariantsToItem(targetItemId, sourceItemId) {
+  if (!sourceItemId) return;
+  const sourceGroups = state.variantGroups.filter(g => g.menu_item_id === sourceItemId);
+  for (const g of sourceGroups) {
+    const { data: newGroup, error } = await sb.from('menu_item_variant_groups').insert({
+      tenant_id: state.tenant.id, menu_item_id: targetItemId, name: g.name,
+      selection_type: g.selection_type, required: g.required,
+      min_select: g.min_select, max_select: g.max_select,
+      sort_order: state.variantGroups.filter(x => x.menu_item_id === targetItemId).length + 1
+    }).select().single();
+    if (error) { showMsg('menu-msg', error.message, 'error'); continue; }
+    state.variantGroups.push(newGroup);
+    const sourceOptions = state.variantOptions.filter(o => o.variant_group_id === g.id);
+    for (const opt of sourceOptions) {
+      const { data: newOpt } = await sb.from('menu_item_variant_options').insert({
+        tenant_id: state.tenant.id, variant_group_id: newGroup.id, name: opt.name,
+        price_delta: opt.price_delta, sort_order: opt.sort_order
+      }).select().single();
+      if (newOpt) state.variantOptions.push(newOpt);
+    }
+  }
+  render();
+}
+
+// ============================================================
+// STORE SETTINGS
+// ============================================================
+async function saveTenantSettings(fields) {
+  const { data, error } = await sb.from('tenants').update(fields).eq('id', state.tenant.id).select().single();
+  if (error) return showMsg('settings-msg', error.message, 'error');
+  state.tenant = data;
+  showMsg('settings-msg', 'Saved.', 'ok');
+  render();
+}
+function submitSettings() {
+  saveTenantSettings({
+    name: document.getElementById('s-name').value.trim(),
+    address: document.getElementById('s-address').value.trim(),
+    primary_color: document.getElementById('s-primary-color').value.trim() || null,
+    accent_color: document.getElementById('s-accent-color').value.trim() || null,
+    logo_url: document.getElementById('s-logo-url').value.trim() || null,
+  });
+}
+
+// ============================================================
+// TABLES
+// ============================================================
+async function deleteTable(id) {
+  if (!confirm('Delete this table? Its QR code will stop working.')) return;
+  const { error } = await sb.from('tables').delete().eq('id', id);
+  if (error) return showMsg('tables-msg', error.message, 'error');
+  state.tables = state.tables.filter(t => t.id !== id);
+  render();
+}
+function addTableLive() {
+  const code = document.getElementById('t-code').value.trim();
+  const name = document.getElementById('t-name').value.trim();
+  if (!code) return showMsg('tables-msg', 'Table code is required.', 'error');
+  addTable(code, name);
+  document.getElementById('t-code').value = '';
+  document.getElementById('t-name').value = '';
+}
+
+// ============================================================
+// ORDERS
+// ============================================================
+async function updateOrderStatus(orderId, status) {
+  await sb.from('orders').update({ status }).eq('id', orderId);
+  await loadOrders();
+  render();
+}
+
+// ============================================================
+// RENDERING
+// ============================================================
+function render() {
+  if (state.view === 'login') return renderLogin();
+  if (state.view === 'wizard') return renderWizard();
+  if (state.view === 'home') return renderHome();
+  root.innerHTML = '<div class="center-screen">Loading…</div>';
+  topbarRight.innerHTML = '';
+}
+
+function renderLogin() {
+  topbarRight.innerHTML = '';
+  root.innerHTML = `
+    <div class="center-screen">
+      <div class="ticket login-card">
+        <div class="eyebrow">Café Console</div>
+        <h1>Sign in</h1>
+        <p class="lead">Manage your menu, tables, and orders.</p>
+        <div id="login-msg" class="msg hidden"></div>
+        <label for="email">Email</label>
+        <input id="email" type="email" placeholder="owner@yourcafe.com" required />
+        <label for="password">Password</label>
+        <input id="password" type="password" placeholder="••••••••" required minlength="6" />
+        <div class="nav-actions">
+          <span class="tab-link" onclick="doSignup()">Create account instead</span>
+          <button class="btn btn-solid" onclick="doLogin()">Sign in</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+function doLogin() {
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  if (!email || !password) return showMsg('login-msg', 'Enter both email and password.', 'error');
+  handleLogin(email, password);
+}
+function doSignup() {
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  if (!email || !password) return showMsg('login-msg', 'Enter both email and password to create an account.', 'error');
+  if (password.length < 6) return showMsg('login-msg', 'Password must be at least 6 characters.', 'error');
+  handleSignup(email, password);
+}
+
+function renderWizard() {
+  topbarRight.innerHTML = `<span class="userline">${state.user.email}</span><button class="btn" onclick="handleLogout()">Sign out</button>`;
+  const s = state.step;
+  root.innerHTML = `
+    <div class="ticket">
+      <div class="stepper">${[1,2,3,4].map(n => `<div class="step-dot ${n < s ? 'done' : n === s ? 'active' : ''}"></div>`).join('')}</div>
+      <div id="wizard-msg" class="msg hidden"></div>
+      <div id="wizard-body"></div>
+    </div>
+  `;
+  const body = document.getElementById('wizard-body');
+
+  if (s === 1) {
+    body.innerHTML = `
+      <div class="eyebrow">Step 1 of 4</div>
+      <h1>Tell us about your café</h1>
+      <p class="lead">This becomes the branding customers see when they scan a table code.</p>
+      <label>Café name</label><input id="w-name" placeholder="Blue Bean Café" />
+      <label>Address</label><input id="w-address" placeholder="12 Zamalek St, Cairo" />
+      <div class="nav-actions">
+        <span class="small">Prices will be in EGP</span>
+        <button class="btn btn-solid" onclick="wizStep1()">Continue</button>
+      </div>
+    `;
+  }
+  if (s === 2) {
+    body.innerHTML = `
+      <div class="eyebrow">Step 2 of 4</div>
+      <h1>Build your menu</h1>
+      <p class="lead">Add at least one category and item. You can add sizes, milk types, and other options later from the Menu tab.</p>
+      <div class="row">
+        <div><label>New category</label><input id="w-cat-name" placeholder="Hot Drinks" /></div>
+        <div style="flex:0 0 auto;"><button class="btn" onclick="wizAddCategory()">Add category</button></div>
+      </div>
+      <div style="margin-top:18px">
+        ${state.categories.map(c => `
+          <div style="margin-bottom:14px">
+            <strong>${escapeHtml(c.name)}</strong>
+            <div class="row" style="margin-top:8px">
+              <div><input id="w-item-name-${c.id}" placeholder="Item name"/></div>
+              <div style="flex:0 0 100px"><input id="w-item-price-${c.id}" placeholder="EGP"/></div>
+              <div style="flex:0 0 auto"><button class="btn" onclick="wizAddItem('${c.id}')">Add</button></div>
+            </div>
+            ${state.items.filter(i => i.category_id === c.id).map(i => `
+              <div style="display:flex;justify-content:space-between;padding:6px 0"><span>${escapeHtml(i.name)}</span><span class="item-price">${money(i.base_price)} EGP</span></div>
+            `).join('') || '<div class="small" style="padding:6px 0">No items yet</div>'}
+          </div>
+        `).join('') || '<div class="empty">No categories yet — add one above</div>'}
+      </div>
+      <div class="nav-actions">
+        <button class="btn" onclick="wizBack()">Back</button>
+        <button class="btn btn-solid" ${state.items.length === 0 ? 'disabled' : ''} onclick="wizStep2()">Continue</button>
+      </div>
+    `;
+  }
+  if (s === 3) {
+    body.innerHTML = `
+      <div class="eyebrow">Step 3 of 4</div>
+      <h1>Set up your tables</h1>
+      <p class="lead">Each table gets its own QR code. Print it and place it on the table.</p>
+      <div class="row">
+        <div><label>Table code</label><input id="w-table-code" placeholder="A07" /></div>
+        <div><label>Display name (optional)</label><input id="w-table-name" placeholder="Patio Table 7" /></div>
+        <div style="flex:0 0 auto;"><button class="btn" onclick="wizAddTable()">Generate QR</button></div>
+      </div>
+      <div class="grid2" style="margin-top:20px" id="qr-grid">
+        ${state.tables.map(t => tableQrBlock(t, false)).join('') || '<div class="empty">No tables yet — add one above</div>'}
+      </div>
+      <div class="nav-actions">
+        <button class="btn" onclick="wizBack()">Back</button>
+        <button class="btn btn-solid" ${state.tables.length === 0 ? 'disabled' : ''} onclick="wizStep3()">Continue</button>
+      </div>
+    `;
+    state.tables.forEach(renderQr);
+  }
+  if (s === 4) {
+    const lp = state.loyalty || {};
+    body.innerHTML = `
+      <div class="eyebrow">Step 4 of 4 — optional</div>
+      <h1>Loyalty program</h1>
+      <p class="lead">Reward repeat customers automatically. You can skip this and turn it on later from the Loyalty tab.</p>
+      <div class="checkline"><input type="checkbox" id="w-loy-active" ${lp.active ? 'checked' : ''}/> Enable loyalty program</div>
+      <div class="row">
+        <div><label>Type</label>
+          <select id="w-loy-type">
+            <option value="punch" ${lp.type==='punch'?'selected':''}>Punch card (every N orders)</option>
+            <option value="points" ${lp.type==='points'?'selected':''}>Points (% cashback)</option>
+          </select>
+        </div>
+        <div><label>Threshold / %</label><input id="w-loy-threshold" placeholder="e.g. 8, or 5 for 5%" value="${lp.punch_threshold || lp.points_percent || ''}"/></div>
+      </div>
+      <label>Reward description</label><input id="w-loy-desc" placeholder="Free drink of choice" value="${lp.reward_description || ''}"/>
+      <label>Reward value (EGP, optional)</label><input id="w-loy-value" placeholder="65" value="${lp.reward_value || ''}"/>
+      <div class="nav-actions">
+        <button class="btn" onclick="wizBack()">Back</button>
+        <button class="btn btn-solid" onclick="wizFinish()">Finish setup</button>
+      </div>
+    `;
+  }
+}
+
+function tableQrBlock(t, withDelete) {
+  const url = `https://${PLATFORM_DOMAIN}/t/${state.tenant.slug}/${t.table_code}`;
+  return `
+    <div class="qr-box">
+      ${withDelete ? `<button class="icon-btn qr-delete" onclick="deleteTable('${t.id}')" title="Delete table">✕</button>` : ''}
+      <div id="qr-${t.id}"></div>
+      <div style="font-weight:bold;margin-top:6px">${escapeHtml(t.display_name || t.table_code)}</div>
+      <div class="qr-caption">${url}</div>
+    </div>
+  `;
+}
+function renderQr(t) {
+  const el = document.getElementById('qr-' + t.id);
+  if (!el || el.childElementCount > 0) return;
+  const url = `https://${PLATFORM_DOMAIN}/t/${state.tenant.slug}/${t.table_code}`;
+  new QRCode(el, { text: url, width: 140, height: 140, colorDark: '#2B1D14', colorLight: '#ffffff' });
+}
+
+function renderHome() {
+  topbarRight.innerHTML = `<span class="userline">${escapeHtml(state.tenant.name)} · ${state.user.email}</span><button class="btn" onclick="handleLogout()">Sign out</button>`;
+  root.innerHTML = `
+    <div class="tabs">
+      ${['orders','menu','tables','loyalty','settings'].map(t => `
+        <div class="tab ${state.homeTab === t ? 'active' : ''}" onclick="switchTab('${t}')">${t}</div>
+      `).join('')}
+    </div>
+    <div id="tab-body"></div>
+  `;
+  const body = document.getElementById('tab-body');
+  if (state.homeTab === 'orders') body.innerHTML = renderOrdersTab();
+  if (state.homeTab === 'menu') body.innerHTML = renderMenuTab();
+  if (state.homeTab === 'tables') body.innerHTML = renderTablesTab();
+  if (state.homeTab === 'loyalty') body.innerHTML = renderLoyaltyTab();
+  if (state.homeTab === 'settings') body.innerHTML = renderSettingsTab();
+  if (state.homeTab === 'tables') state.tables.forEach(renderQr);
+}
+function switchTab(t) { state.homeTab = t; state.expandedItemId = null; render(); }
+
+function renderOrdersTab() {
+  const payoutStatus = state.tenant.stripe_connect_status || 'not_started';
+  return `
+    <div class="ticket">
+      <div class="eyebrow">${escapeHtml(state.tenant.slug)}</div>
+      <h1>${escapeHtml(state.tenant.name)}</h1>
+      <p class="lead">${state.tables.length} table${state.tables.length===1?'':'s'} · ${state.items.length} menu item${state.items.length===1?'':'s'} · Payout: <span class="pill ${payoutStatus==='verified'?'':'warn'}">${payoutStatus.replace('_',' ')}</span></p>
+    </div>
+    <div class="ticket">
+      <h2>Live orders</h2>
+      ${state.orders.length === 0 ? '<div class="empty">No orders yet. Once a customer scans a table QR and orders, it shows up here in real time.</div>' :
+        state.orders.map(o => renderOrderCard(o)).join('')}
+    </div>
+  `;
+}
+
+function renderOrderCard(o) {
+  const lines = state.orderItems.filter(oi => oi.order_id === o.id);
+  const table = state.tables.find(t => t.id === o.table_id);
+  const tableLabel = table ? (table.display_name || table.table_code) : o.table_id.slice(0,4);
+  return `
+    <div style="padding:10px 0;border-bottom:1px dashed var(--line)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <span style="flex:1;font-weight:bold">Table ${escapeHtml(tableLabel)} <span class="small" style="font-weight:normal">· #${o.id.slice(0,8)}</span></span>
+        <span class="status-badge status-${o.status}">${o.status}</span>
+        <select onchange="updateOrderStatus('${o.id}', this.value)" style="width:auto">
+          <option value="pending" ${o.status==='pending'?'selected':''}>Pending</option>
+          <option value="preparing" ${o.status==='preparing'?'selected':''}>Preparing</option>
+          <option value="ready" ${o.status==='ready'?'selected':''}>Ready</option>
+          <option value="served" ${o.status==='served'?'selected':''}>Served</option>
+        </select>
+      </div>
+      ${lines.length === 0 ? '<div class="small">No items recorded for this order</div>' : lines.map(li => `
+        <div style="display:flex;justify-content:space-between;padding:3px 0 3px 12px;font-size:13px">
+          <span>${li.quantity}× ${escapeHtml(li.item_name)}${renderVariantSummary(li.selected_variants)}</span>
+          <span class="item-price">${money(li.line_total)} EGP</span>
+        </div>
+      `).join('')}
+      ${o.reward_discount > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0 3px 12px;font-size:13px;color:var(--ok)"><span>Reward applied</span><span>-${money(o.reward_discount)} EGP</span></div>` : ''}
+      <div style="display:flex;justify-content:flex-end;padding-top:4px;font-weight:bold">${money(o.total)} EGP</div>
+      ${o.notes ? `<div class="small" style="padding-left:12px">Note: ${escapeHtml(o.notes)}</div>` : ''}
+    </div>
+  `;
+}
+
+function renderVariantSummary(selectedVariants) {
+  if (!selectedVariants || !Array.isArray(selectedVariants) || selectedVariants.length === 0) return '';
+  const names = selectedVariants.map(v => v.name).filter(Boolean);
+  return names.length ? ` <span class="small">(${escapeHtml(names.join(', '))})</span>` : '';
+}
+
+function renderMenuTab() {
+  const otherItems = (currentId) => state.items.filter(i => i.id !== currentId && state.variantGroups.some(g => g.menu_item_id === i.id));
+  return `
+    <div class="ticket">
+      <h2>Menu</h2>
+      <div id="menu-msg" class="msg hidden"></div>
+      <div class="row" style="margin-bottom:18px">
+        <div><label>New category</label><input id="m-cat-name" placeholder="e.g. Cold Drinks, Pastries" /></div>
+        <div style="flex:0 0 auto;"><button class="btn btn-solid" onclick="menuAddCategory()">Add category</button></div>
+      </div>
+      ${state.categories.length === 0 ? '<div class="empty">No categories yet — add one above to start building your menu.</div>' : ''}
+      ${state.categories.map(c => renderCategoryBlock(c, otherItems)).join('')}
+    </div>
+  `;
+}
+
+function renderCategoryBlock(c, otherItemsFn) {
+  const items = state.items.filter(i => i.category_id === c.id);
+  return `
+    <div class="category-block">
+      <div class="category-head">
+        <div class="category-title-edit">
+          <input value="${escapeHtml(c.name)}" onchange="updateCategory('${c.id}', {name: this.value})" />
+        </div>
+        <button class="icon-btn" onclick="deleteCategory('${c.id}')" title="Delete category">✕ Delete</button>
+      </div>
+      ${items.map(i => renderItemCard(i, otherItemsFn)).join('')}
+      <div class="row" style="margin-top:12px">
+        <div><input id="new-item-name-${c.id}" placeholder="New item name" /></div>
+        <div style="flex:0 0 90px"><input id="new-item-price-${c.id}" placeholder="EGP" /></div>
+        <div style="flex:0 0 auto"><button class="btn btn-sm" onclick="menuAddItem('${c.id}')">Add item</button></div>
+      </div>
+    </div>
+  `;
+}
+
+function renderItemCard(item, otherItemsFn) {
+  const expanded = state.expandedItemId === item.id;
+  const groups = state.variantGroups.filter(g => g.menu_item_id === item.id);
+  const others = otherItemsFn(item.id);
+  return `
+    <div class="item-card">
+      <div class="item-head">
+        <span class="item-name">${escapeHtml(item.name)}</span>
+        ${item.sold_out ? '<span class="pill warn">Sold out</span>' : ''}
+        ${groups.length ? `<span class="pill muted">${groups.length} variant group${groups.length===1?'':'s'}</span>` : ''}
+        ${item.prep_time_minutes ? `<span class="pill muted">~${item.prep_time_minutes} min</span>` : ''}
+        <span class="item-price">${money(item.base_price)} EGP</span>
+        <button class="btn btn-sm" onclick="toggleItemDetail('${item.id}')">${expanded ? 'Close' : 'Edit'}</button>
+      </div>
+      ${expanded ? `
+        <div class="item-detail">
+          <div class="row">
+            <div><label>Name</label><input id="edit-name-${item.id}" value="${escapeHtml(item.name)}"/></div>
+            <div style="flex:0 0 100px"><label>Price (EGP)</label><input id="edit-price-${item.id}" value="${item.base_price}"/></div>
+            <div style="flex:0 0 110px"><label>Prep time (min)</label><input id="edit-prep-${item.id}" value="${item.prep_time_minutes || ''}" placeholder="8"/></div>
+          </div>
+          <label>Description</label>
+          <textarea id="edit-desc-${item.id}" rows="2">${escapeHtml(item.description || '')}</textarea>
+          <label>Photo URL</label>
+          <input id="edit-photo-${item.id}" value="${escapeHtml(item.photo_url || '')}" placeholder="https://…"/>
+          <div class="nav-actions">
+            <div>
+              <button class="btn btn-sm ${item.sold_out ? '' : 'btn-danger'}" onclick="toggleSoldOut('${item.id}', ${item.sold_out})">${item.sold_out ? 'Mark in stock' : 'Mark sold out'}</button>
+              <button class="btn btn-sm btn-danger" onclick="deleteItem('${item.id}')">Delete item</button>
+            </div>
+            <button class="btn btn-sm btn-solid" onclick="saveItemEdits('${item.id}')">Save</button>
+          </div>
+
+          <hr class="divider"/>
+          <h3>Variants (size, milk type, add-ons…)</h3>
+          ${others.length ? `
+            <div class="row" style="align-items:center">
+              <div style="flex:0 0 auto" class="small">Copy variants from</div>
+              <div>
+                <select id="copy-src-${item.id}">
+                  <option value="">Choose an item…</option>
+                  ${others.map(o => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('')}
+                </select>
+              </div>
+              <div style="flex:0 0 auto"><button class="btn btn-sm" onclick="copyVariantsToItem('${item.id}', document.getElementById('copy-src-${item.id}').value)">Copy</button></div>
+            </div>
+          ` : ''}
+          ${groups.map(g => renderVariantGroup(g)).join('')}
+          <div class="variant-add-row">
+            <input id="new-group-name-${item.id}" placeholder="Group name, e.g. Size or Milk type" style="flex:1"/>
+            <select id="new-group-type-${item.id}" style="flex:0 0 120px">
+              <option value="single">Single choice</option>
+              <option value="multiple">Multiple choice</option>
+            </select>
+            <label class="checkline" style="margin:0"><input type="checkbox" id="new-group-required-${item.id}"/> Required</label>
+            <button class="btn btn-sm" onclick="menuAddVariantGroup('${item.id}')">Add group</button>
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function renderVariantGroup(g) {
+  const options = state.variantOptions.filter(o => o.variant_group_id === g.id);
+  return `
+    <div class="variant-group">
+      <div class="variant-group-head">
+        <strong style="flex:1">${escapeHtml(g.name)}</strong>
+        <span class="small">${g.selection_type === 'single' ? 'pick one' : 'pick any'}</span>
+        <label class="checkline" style="margin:0">
+          <input type="checkbox" ${g.required ? 'checked' : ''} onchange="updateVariantGroupRequired('${g.id}', this.checked)"/> Required
+        </label>
+        <button class="icon-btn" onclick="deleteVariantGroup('${g.id}')" title="Delete group">✕</button>
+      </div>
+      ${options.map(o => `
+        <div class="variant-option-row">
+          <span class="item-name">${escapeHtml(o.name)}${o.sold_out ? ' <span class="pill warn">sold out</span>' : ''}</span>
+          <span class="small">${o.price_delta >= 0 ? '+' : ''}${money(o.price_delta)} EGP</span>
+          <button class="icon-btn" onclick="toggleOptionSoldOut('${o.id}', ${o.sold_out})" title="Toggle sold out">⦿</button>
+          <button class="icon-btn" onclick="deleteVariantOption('${o.id}')" title="Delete option">✕</button>
+        </div>
+      `).join('') || '<div class="small">No options yet</div>'}
+      <div class="variant-add-row">
+        <input id="new-opt-name-${g.id}" placeholder="Option name, e.g. Large" style="flex:1"/>
+        <input id="new-opt-delta-${g.id}" placeholder="Price +/- EGP" style="flex:0 0 110px"/>
+        <button class="btn btn-sm" onclick="menuAddVariantOption('${g.id}')">Add option</button>
+      </div>
+    </div>
+  `;
+}
+
+function menuAddCategory() {
+  const el = document.getElementById('m-cat-name');
+  addCategoryLive(el.value); el.value = '';
+}
+function menuAddItem(catId) {
+  const nameEl = document.getElementById('new-item-name-' + catId);
+  const priceEl = document.getElementById('new-item-price-' + catId);
+  addItemLive(catId, nameEl.value, priceEl.value);
+  nameEl.value = ''; priceEl.value = '';
+}
+function menuAddVariantGroup(itemId) {
+  const name = document.getElementById('new-group-name-' + itemId).value;
+  const type = document.getElementById('new-group-type-' + itemId).value;
+  const required = document.getElementById('new-group-required-' + itemId).checked;
+  addVariantGroup(itemId, name, type, required);
+}
+function menuAddVariantOption(groupId) {
+  const name = document.getElementById('new-opt-name-' + groupId).value;
+  const delta = document.getElementById('new-opt-delta-' + groupId).value;
+  addVariantOption(groupId, name, delta);
+}
+
+function renderTablesTab() {
+  return `
+    <div class="ticket">
+      <h2>Tables &amp; QR codes</h2>
+      <div id="tables-msg" class="msg hidden"></div>
+      <div class="row" style="margin-bottom:20px">
+        <div><label>Table code</label><input id="t-code" placeholder="A07"/></div>
+        <div><label>Display name (optional)</label><input id="t-name" placeholder="Patio Table 7"/></div>
+        <div style="flex:0 0 auto"><button class="btn btn-solid" onclick="addTableLive()">Generate QR</button></div>
+      </div>
+      <div class="grid2">${state.tables.map(t => tableQrBlock(t, true)).join('') || '<div class="empty">No tables yet</div>'}</div>
+    </div>
+  `;
+}
+
+function renderLoyaltyTab() {
+  const lp = state.loyalty || {};
+  return `
+    <div class="ticket">
+      <h2>Loyalty program</h2>
+      <div id="loyalty-msg" class="msg hidden"></div>
+      <p class="lead">Reward repeat customers automatically. Changes apply immediately to new orders.</p>
+      <div class="checkline"><input type="checkbox" id="w-loy-active" ${lp.active ? 'checked' : ''}/> Enable loyalty program</div>
+      <div class="row">
+        <div><label>Type</label>
+          <select id="w-loy-type">
+            <option value="punch" ${lp.type==='punch'?'selected':''}>Punch card (every N orders)</option>
+            <option value="points" ${lp.type==='points'?'selected':''}>Points (% cashback)</option>
+          </select>
+        </div>
+        <div><label>Threshold / %</label><input id="w-loy-threshold" value="${lp.punch_threshold || lp.points_percent || ''}"/></div>
+      </div>
+      <label>Reward description</label><input id="w-loy-desc" value="${lp.reward_description || ''}" placeholder="Free drink of choice"/>
+      <label>Reward value (EGP, optional)</label><input id="w-loy-value" value="${lp.reward_value || ''}" placeholder="65"/>
+      <div class="nav-actions">
+        <span></span>
+        <button class="btn btn-solid" onclick="saveLoyaltyFromTab()">Save loyalty settings</button>
+      </div>
+    </div>
+  `;
+}
+function saveLoyaltyFromTab() {
+  const active = document.getElementById('w-loy-active').checked;
+  const type = document.getElementById('w-loy-type').value;
+  const threshold = document.getElementById('w-loy-threshold').value;
+  const desc = document.getElementById('w-loy-desc').value;
+  const value = document.getElementById('w-loy-value').value;
+  saveLoyalty(active, type, threshold, desc, value);
+}
+
+function renderSettingsTab() {
+  const t = state.tenant;
+  const payoutStatus = t.stripe_connect_status || 'not_started';
+  return `
+    <div class="ticket">
+      <h2>Store details</h2>
+      <div id="settings-msg" class="msg hidden"></div>
+      <label>Café name</label><input id="s-name" value="${escapeHtml(t.name)}"/>
+      <label>Address</label><input id="s-address" value="${escapeHtml(t.address || '')}"/>
+      <div class="row">
+        <div><label>Primary color (hex)</label><input id="s-primary-color" value="${escapeHtml(t.primary_color || '')}" placeholder="#2E7D32"/></div>
+        <div><label>Accent color (hex)</label><input id="s-accent-color" value="${escapeHtml(t.accent_color || '')}" placeholder="#D9A44C"/></div>
+      </div>
+      <label>Logo URL</label><input id="s-logo-url" value="${escapeHtml(t.logo_url || '')}" placeholder="https://…"/>
+      <div class="nav-actions">
+        <span class="small">Slug: ${escapeHtml(t.slug)} · Currency: ${escapeHtml(t.currency)}</span>
+        <button class="btn btn-solid" onclick="submitSettings()">Save changes</button>
+      </div>
+    </div>
+    <div class="ticket">
+      <h2>Payouts</h2>
+      <p class="lead">${payoutStatus === 'verified' ? 'Your Stripe Connect account is verified — payouts are active.' : 'Connect your bank account via Stripe to start receiving payouts.'}</p>
+      <button class="btn btn-solid" onclick="startStripeOnboarding()" ${payoutStatus === 'verified' ? 'disabled' : ''}>
+        ${payoutStatus === 'verified' ? 'Connected' : 'Connect bank account'}
+      </button>
+    </div>
+  `;
+}
+
+async function startStripeOnboarding() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return;
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/stripe-connect-onboarding`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tenant_id: state.tenant.id, return_url: window.location.href, refresh_url: window.location.href })
+  });
+  const data = await res.json();
+  if (data.error) return alert('Could not start onboarding: ' + data.error);
+  window.location.href = data.url;
+}
+</script>
+</body>
+</html>
