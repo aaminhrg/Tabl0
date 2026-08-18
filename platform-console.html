@@ -95,6 +95,7 @@ async function checkAdmin() {
     state.overview = data;
     state.view = 'dashboard';
     await loadTenants();
+    await loadTickets();
   } else {
     state.isAdmin = false;
     state.view = 'denied';
@@ -167,7 +168,10 @@ function renderDashboard() {
   topbarRight.innerHTML = `<span class="userline">${escapeHtml(state.user.email)}</span> <button class="btn" onclick="doLogout()" style="margin-left:12px">Sign out</button>`;
   root.innerHTML = `
     <div class="tabs">
-      ${['overview','businesses','support','reports','insights','team','billing'].map(t => `<div class="tab ${state.tab===t?'active':''}" onclick="switchTab('${t}')">${t}</div>`).join('')}
+      ${['overview','businesses','support','reports','insights','team','billing'].map(t => {
+        const unread = t === 'support' ? state.tickets.filter(tk => !tk.admin_read_at || (tk.updated_at && new Date(tk.updated_at) > new Date(tk.admin_read_at))).length : 0;
+        return `<div class="tab ${state.tab===t?'active':''}" onclick="switchTab('${t}')">${t}${unread > 0 ? ` <span class="pill error" style="margin-left:4px">${unread}</span>` : ''}</div>`;
+      }).join('')}
     </div>
     <div id="tab-body"></div>`;
   const body = document.getElementById('tab-body');
@@ -181,7 +185,11 @@ function renderDashboard() {
 }
 async function switchTab(t) {
   state.tab = t; state.detailTenant = null;
-  if (t === 'support' && state.tickets.length === 0) await loadTickets();
+  if (t === 'support') {
+    await loadTickets();
+    await sb.rpc('mark_admin_tickets_read');
+    await loadTickets(); // refresh with updated admin_read_at so the badge clears
+  }
   render();
 }
 
