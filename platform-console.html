@@ -167,7 +167,7 @@ function renderDashboard() {
   topbarRight.innerHTML = `<span class="userline">${escapeHtml(state.user.email)}</span> <button class="btn" onclick="doLogout()" style="margin-left:12px">Sign out</button>`;
   root.innerHTML = `
     <div class="tabs">
-      ${['overview','businesses','support','reports','insights'].map(t => `<div class="tab ${state.tab===t?'active':''}" onclick="switchTab('${t}')">${t}</div>`).join('')}
+      ${['overview','businesses','support','reports','insights','team'].map(t => `<div class="tab ${state.tab===t?'active':''}" onclick="switchTab('${t}')">${t}</div>`).join('')}
     </div>
     <div id="tab-body"></div>`;
   const body = document.getElementById('tab-body');
@@ -176,6 +176,7 @@ function renderDashboard() {
   if (state.tab === 'support') body.innerHTML = renderSupport();
   if (state.tab === 'reports') renderReportsTab();
   if (state.tab === 'insights') renderInsightsTab();
+  if (state.tab === 'team') { renderTeamTab(); loadPlatformAdmins(); }
 }
 async function switchTab(t) {
   state.tab = t; state.detailTenant = null;
@@ -581,6 +582,64 @@ function exportInsightsPdf() {
   doc.autoTable({ startY: doc.lastAutoTable.finalY+10, head: [['Category','Qty Sold']], body: d.category_breakdown.map(c=>[c.category_name||'Uncategorized',c.qty]), theme: 'grid', headStyles: { fillColor: [43,29,20] } });
   doc.autoTable({ startY: doc.lastAutoTable.finalY+10, head: [['Variant Preference','Times Selected']], body: d.variant_popularity.map(v=>[v.option_name,v.times_selected]), theme: 'striped', headStyles: { fillColor: [43,29,20] } });
   doc.save(`Tabl0_Market_Study_${insightsState.rangeLabel.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.pdf`);
+}
+
+// ============================================================
+// TEAM — manage who has platform admin access
+// ============================================================
+let platformAdmins = [];
+async function loadPlatformAdmins() {
+  const { data } = await sb.rpc('get_platform_admins');
+  platformAdmins = data || [];
+  renderTeamTab();
+}
+function renderTeamTab() {
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="ticket">
+      <h2>Platform admins</h2>
+      <p class="lead">Anyone listed here can see every business's data, orders, and revenue across the platform. Only add people you fully trust with that access.</p>
+      <div id="team-msg" class="msg hidden"></div>
+      <div class="row">
+        <div><label>Add by email</label><input id="new-admin-email" placeholder="colleague@example.com"/></div>
+        <div style="flex:0 0 auto"><button class="btn btn-sm btn-solid" style="margin-top:14px" onclick="addAdmin()">Grant admin access</button></div>
+      </div>
+      <p class="small" style="margin-top:6px">They must already have a Tabl0 account (signed up via the café console or elsewhere) — this doesn't create a new account, only grants access to an existing one.</p>
+    </div>
+    <div class="ticket">
+      <h2>Current admins (${platformAdmins.length})</h2>
+      ${platformAdmins.map(a => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px dashed var(--line)">
+          <div>
+            <strong>${escapeHtml(a.email)}</strong>
+            ${a.user_id === state.user.id ? '<span class="pill ok" style="margin-left:8px">You</span>' : ''}
+            <div class="small">Added ${new Date(a.added_at).toLocaleDateString()}</div>
+          </div>
+          ${a.user_id === state.user.id ? '' : `<button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" onclick="removeAdmin('${a.user_id}','${escapeHtml(a.email)}')">Remove access</button>`}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+async function addAdmin() {
+  const email = document.getElementById('new-admin-email').value.trim();
+  if (!email) return;
+  const { data, error } = await sb.rpc('add_platform_admin', { p_email: email });
+  if (error || (data && data.error)) {
+    const msg = (data && data.error === 'no_account_found')
+      ? 'No Tabl0 account exists with that email yet — they need to sign up first (e.g. via the café console), then you can grant them admin access.'
+      : 'Something went wrong.';
+    document.getElementById('team-msg').textContent = msg;
+    document.getElementById('team-msg').className = 'msg error';
+    return;
+  }
+  await loadPlatformAdmins();
+}
+async function removeAdmin(userId, email) {
+  if (!confirm(`Remove platform admin access for ${email}?`)) return;
+  await sb.rpc('remove_platform_admin', { p_user_id: userId });
+  await loadPlatformAdmins();
 }
 </script>
 </body>
