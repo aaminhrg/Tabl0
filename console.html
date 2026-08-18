@@ -250,7 +250,7 @@ async function loadTenant() {
 }
 
 async function loadAll() {
-  await Promise.all([loadMenu(), loadTables(), loadLoyalty(), loadOrders()]);
+  await Promise.all([loadMenu(), loadTables(), loadLoyalty(), loadOrders(), loadMyTickets()]);
 }
 
 async function loadMenu() {
@@ -1018,10 +1018,11 @@ function renderQr(t) {
 
 function renderHome() {
   topbarRight.innerHTML = `<span class="userline">${escapeHtml(state.tenant.name)} · ${state.user.email}</span><button class="btn" onclick="handleLogout()">Sign out</button>`;
+  const unreadCount = myTickets.filter(t => !t.tenant_read_at || (t.updated_at && new Date(t.updated_at) > new Date(t.tenant_read_at))).length;
   root.innerHTML = `
     <div class="tabs">
       ${['orders','menu','tables','loyalty','reports','billing','settings','support'].map(t => `
-        <div class="tab ${state.homeTab === t ? 'active' : ''}" onclick="switchTab('${t}')">${t}</div>
+        <div class="tab ${state.homeTab === t ? 'active' : ''}" onclick="switchTab('${t}')">${t}${t === 'support' && unreadCount > 0 ? ` <span class="pill error" style="margin-left:4px">${unreadCount}</span>` : ''}</div>
       `).join('')}
     </div>
     <div id="tab-body"></div>
@@ -1034,7 +1035,7 @@ function renderHome() {
   if (state.homeTab === 'settings') body.innerHTML = renderSettingsTab();
   if (state.homeTab === 'reports') renderReportsTab();
   if (state.homeTab === 'billing') { renderBillingTab(); loadBillingSummary(); }
-  if (state.homeTab === 'support') { renderSupportTab(); loadMyTickets(); }
+  if (state.homeTab === 'support') { renderSupportTab(); markSupportRead(); }
   if (state.homeTab === 'tables') state.tables.forEach(renderQr);
 }
 function switchTab(t) { state.homeTab = t; state.expandedItemId = null; render(); }
@@ -1043,7 +1044,12 @@ let myTickets = [];
 async function loadMyTickets() {
   const { data } = await sb.from('support_tickets').select('*').eq('tenant_id', state.tenant.id).order('created_at', { ascending: false });
   myTickets = data || [];
-  renderSupportTab();
+  if (state.homeTab === 'support') renderSupportTab();
+}
+async function markSupportRead() {
+  await sb.rpc('mark_tenant_tickets_read', { p_tenant_id: state.tenant.id });
+  await loadMyTickets();
+  render(); // refresh tab bar so the badge clears immediately
 }
 // ============================================================
 // REPORTS — shift/day/week/month/year order reports with Excel/PDF export
