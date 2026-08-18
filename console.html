@@ -378,7 +378,7 @@ async function handleLogin(email, password) {
   await loadTenant();
 }
 async function handleSignup(email, password) {
-  const { data, error } = await sb.auth.signUp({ email, password });
+  const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: `https://${PLATFORM_DOMAIN}/console.html` } });
   if (error) return showMsg('login-msg', error.message, 'error');
   if (!data.session) return showMsg('login-msg', 'Check your email to confirm your account, then log in.', 'ok');
   state.user = data.session.user;
@@ -768,7 +768,7 @@ async function handleKitchenLoginOrSignup(email, password, code) {
   if (signInResult.data && signInResult.data.session) {
     session = signInResult.data.session;
   } else {
-    const signUpResult = await sb.auth.signUp({ email, password });
+    const signUpResult = await sb.auth.signUp({ email, password, options: { emailRedirectTo: `https://${PLATFORM_DOMAIN}/console.html` } });
     if (signUpResult.error) return showMsg('login-msg', signUpResult.error.message, 'error');
     if (!signUpResult.data.session) {
       return showMsg('login-msg', 'Check your email to confirm your account, then sign in again with your invite code.', 'ok');
