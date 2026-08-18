@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Order</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<title>Tabl0 — Table ordering for independent cafés</title>
 <style>
   :root {
     --espresso: #2B1D14;
+    --espresso-2: #241811;
     --crema: #F2E9DC;
     --paper: #FAF6EF;
     --gold: #C08A2E;
@@ -15,250 +15,228 @@
     --line: #C9B8A0;
     --ink: #2B1D14;
     --ink-soft: #6B5B47;
-    --error: #A63D2F;
     --ok: #3D6B4A;
-    --radius: 10px;
     --mono: 'Courier New', Courier, monospace;
   }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    margin: 0; background: var(--crema); color: var(--ink);
-    font-family: Georgia, 'Times New Roman', serif; min-height: 100vh; padding-bottom: 90px;
+    font-family: Georgia, 'Times New Roman', serif;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.5;
   }
+  a { color: inherit; text-decoration: none; }
+
+  .nav {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--espresso); color: var(--crema);
+    border-bottom: 2px solid var(--gold);
+    padding: 16px 28px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .nav-brand { font-size: 19px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .nav-brand span { color: var(--gold-bright); }
+  .nav-links { display: flex; align-items: center; gap: 22px; font-family: var(--mono); font-size: 13px; }
+  .nav-links a:hover { color: var(--gold-bright); }
+  .btn {
+    font-family: var(--mono); font-size: 13px; letter-spacing: 0.02em;
+    padding: 10px 20px; border-radius: 6px; cursor: pointer; display: inline-block;
+    border: 1px solid var(--gold);
+  }
+  .btn-solid { background: var(--gold); color: var(--espresso); font-weight: bold; border: none; }
+  .btn-solid:hover { background: var(--gold-bright); }
+  .btn-ghost { background: transparent; color: var(--gold-bright); }
+  .btn-ghost:hover { background: rgba(192,138,46,0.15); }
+
   .hero {
-    background: var(--espresso); color: var(--crema); padding: 22px 20px 26px;
-    border-bottom: 3px solid var(--gold);
+    background: var(--espresso); color: var(--crema);
+    padding: 90px 28px 100px; text-align: center; position: relative; overflow: hidden;
   }
-  .hero-slug { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-bright); margin-bottom: 4px; }
-  .hero-name { font-size: 24px; margin: 0 0 4px; }
-  .hero-table { font-family: var(--mono); font-size: 12px; color: var(--line); }
-
-  .wrap { max-width: 560px; margin: 0 auto; padding: 18px 16px; }
-
-  .loyalty-banner {
-    background: #fff; border: 1px solid var(--gold); border-radius: var(--radius);
-    padding: 12px 16px; margin-bottom: 16px; display:flex; align-items:center; gap: 12px;
+  .hero::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 14px;
+    background-image: radial-gradient(circle, var(--paper) 6px, transparent 6.5px);
+    background-size: 24px 24px; background-position: 0 0;
   }
-  .loyalty-progress-track { flex:1; height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
-  .loyalty-progress-fill { height: 100%; background: var(--gold); }
-  .loyalty-text { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+  .hero-eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold-bright); margin-bottom: 18px; }
+  .hero h1 { font-size: clamp(32px, 5vw, 56px); line-height: 1.15; max-width: 780px; margin: 0 auto 22px; }
+  .hero h1 em { font-style: normal; color: var(--gold-bright); }
+  .hero p { font-size: 18px; color: var(--line); max-width: 520px; margin: 0 auto 36px; }
+  .hero-ctas { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .hero-ctas .btn { padding: 14px 28px; font-size: 14px; }
 
-  .signin-strip {
-    background: #fff; border: 1px dashed var(--line); border-radius: var(--radius);
-    padding: 10px 14px; margin-bottom: 16px; font-family: var(--mono); font-size: 12px;
-    color: var(--ink-soft); display:flex; justify-content:space-between; align-items:center; gap:10px;
+  .section { padding: 80px 28px; max-width: 1080px; margin: 0 auto; }
+  .section-eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--gold); margin-bottom: 10px; text-align: center; }
+  .section h2 { font-size: 32px; text-align: center; margin-bottom: 16px; }
+  .section-lead { text-align: center; color: var(--ink-soft); max-width: 560px; margin: 0 auto 56px; font-size: 16px; }
+
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  @media (max-width: 860px) { .grid3 { grid-template-columns: 1fr; } .hero-ctas { flex-direction: column; align-items: center; } }
+
+  .card {
+    background: #fff; border: 1px solid var(--line); border-radius: 10px;
+    padding: 28px 24px; position: relative;
   }
-  .signin-strip a { color: var(--gold); cursor: pointer; text-decoration: underline; }
+  .card-num { font-family: var(--mono); font-size: 12px; color: var(--gold); letter-spacing: 0.1em; margin-bottom: 14px; }
+  .card h3 { font-size: 19px; margin-bottom: 10px; }
+  .card p { color: var(--ink-soft); font-size: 14.5px; }
 
-  h2 {
-    font-size: 15px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft);
-    margin: 22px 0 12px; padding-bottom: 8px; border-bottom: 1px dashed var(--line);
+  .strip {
+    background: var(--crema); border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line);
   }
-
-  .item {
-    background: #fff; border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px;
-    border: 1px solid var(--line); display:flex; align-items:center; gap: 12px; cursor:pointer;
+  .strip-inner {
+    max-width: 1080px; margin: 0 auto; padding: 56px 28px;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 32px; text-align: center;
   }
-  .item:active { background: var(--crema); }
-  .item-info { flex: 1; }
-  .item-title { font-size: 16px; font-weight: bold; }
-  .item-desc { font-size: 13px; color: var(--ink-soft); margin-top: 2px; }
-  .item-price { font-family: var(--mono); font-size: 14px; color: var(--ink-soft); white-space: nowrap; }
-  .item.sold-out { opacity: 0.5; cursor: not-allowed; }
-  .sold-out-tag { font-family: var(--mono); font-size: 10px; color: var(--error); text-transform: uppercase; }
+  @media (max-width: 720px) { .strip-inner { grid-template-columns: repeat(2, 1fr); } }
+  .stat-num { font-size: 30px; font-weight: bold; color: var(--espresso); }
+  .stat-label { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 6px; }
 
-  .empty { padding: 40px 16px; text-align:center; color: var(--ink-soft); font-style: italic; }
-
-  /* modal */
-  .overlay {
-    position: fixed; inset: 0; background: rgba(43,29,20,0.6); display:flex; align-items:flex-end;
-    justify-content:center; z-index: 50;
+  .flow-step { display: flex; gap: 20px; align-items: flex-start; margin-bottom: 36px; }
+  .flow-num {
+    flex: 0 0 auto; width: 42px; height: 42px; border-radius: 50%; background: var(--espresso); color: var(--gold-bright);
+    display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-weight: bold; font-size: 16px;
   }
-  .sheet {
-    background: var(--paper); width: 100%; max-width: 560px; border-radius: 16px 16px 0 0;
-    padding: 22px 20px 24px; max-height: 88vh; overflow-y: auto;
-  }
-  .sheet-title { font-size: 20px; font-weight: bold; margin: 0 0 4px; }
-  .sheet-desc { font-size: 13px; color: var(--ink-soft); margin-bottom: 16px; }
-  .group-title { font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); margin: 16px 0 8px; display:flex; justify-content:space-betwe[...]
-  .req-tag { color: var(--gold); }
-  .option-row {
-    display:flex; align-items:center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line);
-    border-radius: 8px; margin-bottom: 6px; background:#fff; cursor:pointer;
-  }
-  .option-row.selected { border-color: var(--gold); background: #FBF3E4; }
-  .option-row.disabled { opacity: 0.45; cursor: not-allowed; }
-  .option-name { flex:1; }
-  .option-delta { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+  .flow-text h3 { font-size: 18px; margin-bottom: 6px; }
+  .flow-text p { color: var(--ink-soft); font-size: 14.5px; max-width: 480px; }
 
-  .qty-row { display:flex; align-items:center; gap: 14px; margin: 18px 0; justify-content:center; }
-  .qty-btn {
-    width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--gold); background: #fff;
-    color: var(--gold); font-size: 18px; cursor: pointer;
+  .quote-block {
+    background: var(--espresso); color: var(--crema); border-radius: 12px;
+    padding: 48px 40px; text-align: center; max-width: 720px; margin: 0 auto;
   }
-  .qty-val { font-family: var(--mono); font-size: 18px; min-width: 24px; text-align:center; }
+  .quote-block p { font-size: 20px; font-style: italic; margin-bottom: 18px; }
+  .quote-block .who { font-family: var(--mono); font-size: 13px; color: var(--gold-bright); }
 
-  .btn { font-family: var(--mono); font-size: 14px; padding: 13px 18px; border: none; border-radius: 8px;
-    background: var(--gold); color: var(--espresso); font-weight: bold; cursor: pointer; width: 100%; }
-  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn-ghost { background: transparent; border: 1px solid var(--line); color: var(--ink-soft); font-weight: normal; }
-  .btn-close { position:absolute; top:16px; right:16px; background:none; border:none; font-size: 20px; color: var(--ink-soft); cursor:pointer; }
+  .cta-final { text-align: center; padding: 90px 28px; background: var(--crema); border-top: 1px dashed var(--line); }
+  .cta-final h2 { font-size: 30px; margin-bottom: 14px; }
+  .cta-final p { color: var(--ink-soft); margin-bottom: 30px; }
 
-  .cart-bar {
-    position: fixed; bottom: 0; left: 0; right: 0; background: var(--espresso); color: var(--crema);
-    padding: 14px 18px; display:flex; align-items:center; justify-content:space-between; z-index: 40;
-    box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
+  footer {
+    background: var(--espresso-2); color: var(--line); padding: 40px 28px; text-align: center;
+    font-family: var(--mono); font-size: 12px;
   }
-  .cart-bar-left { font-family: var(--mono); font-size: 13px; }
-  .cart-bar-btn { background: var(--gold); color: var(--espresso); border:none; border-radius: 8px; padding: 11px 20px; font-weight:bold; font-family: var(--mono); font-size: 13px; cursor:pointer[...]
-
-  .cart-line { display:flex; align-items:center; gap:10px; padding: 10px 0; border-bottom: 1px dashed var(--line); }
-  .cart-line-info { flex:1; }
-  .cart-line-name { font-weight: bold; }
-  .cart-line-variants { font-size: 12px; color: var(--ink-soft); }
-  .cart-line-remove { background:none; border:none; color: var(--error); cursor:pointer; font-family: var(--mono); font-size: 12px; }
-  .cart-total-row { display:flex; justify-content:space-between; padding: 10px 0; font-family: var(--mono); }
-  .cart-total-row.grand { font-size: 16px; font-weight:bold; border-top: 1px solid var(--line); margin-top: 8px; padding-top: 12px; }
-  .reward-row { color: var(--ok); }
-
-  .otp-input { text-align:center; letter-spacing: 0.4em; font-size: 22px; font-family: var(--mono); }
-  input {
-    width: 100%; font-family: Georgia, serif; font-size: 15px; padding: 11px 12px;
-    border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); margin-top: 6px;
-  }
-  label { display:block; font-family: var(--mono); font-size: 11px; color: var(--ink-soft); margin-top: 14px; }
-  .msg { font-family: var(--mono); font-size: 12px; padding: 8px 12px; border-radius: 6px; margin-top: 12px; }
-  .msg.error { background: rgba(166,61,47,0.1); color: var(--error); }
-  .msg.ok { background: rgba(61,107,74,0.1); color: var(--ok); }
-  .center-screen { min-height: 100vh; display:flex; align-items:center; justify-content:center; text-align:center; padding: 20px; }
+  footer a { color: var(--gold-bright); }
 </style>
 </head>
 <body>
-<div id="app-root"></div>
 
-<script>
-// ===== Configuration: your live Supabase project =====
-const SUPABASE_URL = 'https://yhrhqfqdxtgifahvkrnw.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_N91RJWdVtL5LgpB7u5uLAA_3NcHqYtt';
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+<div class="nav">
+  <div class="nav-brand">Tabl<span>0</span></div>
+  <div class="nav-links">
+    <a href="#how">How it works</a>
+    <a href="#pricing">Pricing</a>
+    <a href="console.html" class="btn btn-ghost">Sign in</a>
+    <a href="console.html" class="btn btn-solid">Get started</a>
+  </div>
+</div>
 
-// Reads /t/{cafe_slug}/{table_code} from the path, OR ?cafe=&table= for
-// easy testing by just opening this file directly in a browser.
-function parseTarget() {
-  const params = new URLSearchParams(window.location.search);
-  if (params.get('cafe') && params.get('table')) {
-    return { cafeSlug: params.get('cafe'), tableCode: params.get('table') };
-  }
-  const parts = window.location.pathname.split('/').filter(Boolean);
-  const tIdx = parts.indexOf('t');
-  if (tIdx !== -1 && parts[tIdx + 1] && parts[tIdx + 2]) {
-    return { cafeSlug: parts[tIdx + 1], tableCode: parts[tIdx + 2] };
-  }
-  return null;
-}
+<div class="hero">
+  <div class="hero-eyebrow">Table ordering, built for independent cafés</div>
+  <h1>Your customers scan.<br>Your kitchen gets the order.<br><em>No app to install, no queue to stand in.</em></h1>
+  <p>Menu, variants, loyalty, and payouts — set up in one afternoon, live on every table by tomorrow.</p>
+  <div class="hero-ctas">
+    <a href="console.html" class="btn btn-solid">Set up your café — free</a>
+    <a href="#how" class="btn btn-ghost">See how it works</a>
+  </div>
+</div>
 
-let state = {
-  view: 'loading',
-  target: null,
-  data: null,       // resolve_table_link() payload
-  cart: [],          // [{ item, quantity, selectedOptions: [...], lineKey }]
-  activeItem: null,   // item currently open in the picker sheet
-  pickerSelections: {}, // groupId -> [optionId,...]
-  pickerQty: 1,
-  showCartSheet: false,
-  loyalty: null,       // get_loyalty_status() payload
-  otpStage: null,       // null | 'enter-phone' | 'enter-code'
-  phone: '',
-  lastOrder: null,
-  msg: null
-};
+<div class="strip">
+  <div class="strip-inner">
+    <div><div class="stat-num">&lt; 15 min</div><div class="stat-label">To your first live table</div></div>
+    <div><div class="stat-num">0%</div><div class="stat-label">Extra hardware needed</div></div>
+    <div><div class="stat-num">EGP</div><div class="stat-label">Priced for your market</div></div>
+    <div><div class="stat-num">Direct</div><div class="stat-label">Payouts to your own bank</div></div>
+  </div>
+</div>
 
-const root = document.getElementById('app-root');
+<div class="section" id="how">
+  <div class="section-eyebrow">How it works</div>
+  <h2>From QR code to kitchen ticket</h2>
+  <p class="section-lead">No new hardware, no separate app for your staff to learn. Print a code, put it on the table, done.</p>
 
-async function boot() {
-  const target = parseTarget();
-  if (!target) {
-    state.view = 'error';
-    state.msg = 'No table link found. Scan a table\'s QR code, or open this page with ?cafe=slug&table=CODE for testing.';
-    return render();
-  }
-  state.target = target;
+  <div class="flow-step">
+    <div class="flow-num">1</div>
+    <div class="flow-text">
+      <h3>Build your menu once</h3>
+      <p>Categories, items, prices in EGP, and variants — size, milk type, cup type — set up in minutes with reusable templates, not typed from scratch every time.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num">2</div>
+    <div class="flow-text">
+      <h3>Print a QR code per table</h3>
+      <p>Generated automatically the moment you add a table. No design work, no third-party QR tool.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num">3</div>
+    <div class="flow-text">
+      <h3>Customer scans, orders, pays</h3>
+      <p>Opens instantly in their browser or your native app — no download required to place a first order.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num">4</div>
+    <div class="flow-text">
+      <h3>Your kitchen sees it immediately</h3>
+      <p>Live order queue updates in real time, with sound alerts so nothing gets missed during a rush.</p>
+    </div>
+  </div>
+</div>
 
-  const { data: { session } } = await sb.auth.getSession();
+<div class="section">
+  <div class="section-eyebrow">Built for how cafés actually run</div>
+  <h2>Everything, none of the bloat</h2>
+  <p class="section-lead">Not a generic POS bolted onto a QR code — built specifically for table ordering from day one.</p>
+  <div class="grid3">
+    <div class="card">
+      <div class="card-num">01</div>
+      <h3>Real variants, done right</h3>
+      <p>Required vs. optional, single vs. multi-select, per-option pricing. The same flexibility as the apps you already order from.</p>
+    </div>
+    <div class="card">
+      <div class="card-num">02</div>
+      <h3>Loyalty that runs itself</h3>
+      <p>Punch cards or cashback, phone-verified — not device tracking — and rewards apply automatically at checkout.</p>
+    </div>
+    <div class="card">
+      <div class="card-num">03</div>
+      <h3>Your money, your bank</h3>
+      <p>Payouts go straight to your own account. We never hold your funds longer than it takes to settle.</p>
+    </div>
+    <div class="card">
+      <div class="card-num">04</div>
+      <h3>Kitchen-ready display</h3>
+      <p>A dedicated staff login shows just the order queue — nothing else — with a sound alert the moment a new order lands.</p>
+    </div>
+    <div class="card">
+      <div class="card-num">05</div>
+      <h3>No customer app required</h3>
+      <p>Works instantly in any phone's browser. A native app is there for regulars who want it, never a requirement.</p>
+    </div>
+    <div class="card">
+      <div class="card-num">06</div>
+      <h3>You're never locked in</h3>
+      <p>Your menu, your customer data, your payout account. Export or leave anytime — nothing is held hostage.</p>
+    </div>
+  </div>
+</div>
 
-  const { data, error } = await sb.rpc('resolve_table_link', {
-    p_cafe_slug: target.cafeSlug, p_table_code: target.tableCode
-  });
-  if (error || !data) {
-    state.view = 'error';
-    state.msg = 'This table link looks invalid. Please ask staff for help.';
-    return render();
-  }
-  state.data = data;
-  state.view = 'menu';
+<div class="section">
+  <div class="quote-block">
+    <p>"Table numbers stopped being a guessing game. Orders land on the right ticket, every time, and I didn't have to teach my staff anything new."</p>
+    <div class="who">— Early pilot café owner</div>
+  </div>
+</div>
 
-  if (session) await refreshLoyalty();
-  render();
-}
-boot();
+<div class="cta-final" id="pricing">
+  <h2>Start free. Pay only when you're live.</h2>
+  <p>No setup fee, no monthly minimum — a small percentage per order once you're actually taking them.</p>
+  <a href="console.html" class="btn btn-solid" style="padding:15px 32px;font-size:14px">Set up your café now</a>
+</div>
 
-async function refreshLoyalty() {
-  const { data } = await sb.rpc('get_loyalty_status', { p_cafe_slug: state.target.cafeSlug });
-  state.loyalty = data;
-}
+<footer>
+  Tabl0 — table ordering for independent cafés · <a href="console.html">Café sign in</a>
+</footer>
 
-// ---------- Cart helpers ----------
-function priceForOptions(item, groupSelections) {
-  let total = item.base_price;
-  for (const g of item.variant_groups) {
-    for (const optId of (groupSelections[g.id] || [])) {
-      const opt = g.options.find(o => o.id === optId);
-      if (opt) total += Number(opt.price_delta);
-    }
-  }
-  return total;
-}
-function variantsSummary(item, groupSelections) {
-  const parts = [];
-  for (const g of item.variant_groups) {
-    for (const optId of (groupSelections[g.id] || [])) {
-      const opt = g.options.find(o => o.id === optId);
-      if (opt) parts.push(opt.name);
-    }
-  }
-  return parts.join(', ');
-}
-function cartTotal() {
-  return state.cart.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
-}
-function cartCount() {
-  return state.cart.reduce((sum, line) => sum + line.quantity, 0);
-}
-
-// ---------- Item picker sheet ----------
-function openItemPicker(item) {
-  if (item.sold_out) return;
-  state.activeItem = item;
-  state.pickerSelections = {};
-  item.variant_groups.forEach(g => {
-    if (g.selection_type === 'single' && g.required && g.options.length) {
-      state.pickerSelections[g.id] = [g.options.find(o => !o.sold_out)?.id].filter(Boolean);
-    } else {
-      state.pickerSelections[g.id] = [];
-    }
-  });
-  state.pickerQty = 1;
-  render();
-}
-function closeItemPicker() { state.activeItem = null; render(); }
-
-function selectOption(groupId, optionId, selectionType, maxSelect) {
-  const current = state.pickerSelections[groupId] || [];
-  if (selectionType === 'single') {
-    state.pickerSelections[groupId] = [optionId];
-  } else {
-    if (current.includes(optionId)) {
-      state.pickerSelections[groupId] = current.filter(id => id !== optionId);
-    } else {
-      if (maxSelect && current.length >= maxSelect) return;
-      state.pickerSelections[g... (truncated for brevity)
+</body>
+</html>
