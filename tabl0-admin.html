@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tabl0 Admin</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+<style>
+  :root {
+    --espresso: #2B1D14; --espresso-2: #3D2B1F; --crema: #F2E9DC; --paper: #FAF6EF;
+    --gold: #C08A2E; --gold-bright: #D9A44C; --line: #C9B8A0; --ink: #2B1D14; --ink-soft: #6B5B47;
+    --error: #A63D2F; --ok: #3D6B4A; --info: #2D6E8C; --radius: 3px; --mono: 'Courier New', Courier, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--espresso); color: var(--ink); font-family: Georgia, 'Times New Roman', serif; min-height: 100vh; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; padding: 18px 28px; background: var(--espresso-2); border-bottom: 2px solid var(--gold); }
+  .brand { color: var(--crema); font-size: 20px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .brand span { color: var(--gold-bright); }
+  .userline { color: var(--line); font-family: var(--mono); font-size: 12px; }
+  .btn { font-family: var(--mono); font-size: 13px; padding: 9px 16px; border: 1px solid var(--gold); background: transparent; color: var(--gold-bright); cursor: pointer; border-radius: var(--radius); }
+  .btn:hover { background: rgba(192,138,46,0.15); }
+  .btn-solid { background: var(--gold); color: var(--espresso); border: 1px solid var(--gold); font-weight: bold; }
+  .btn-sm { padding: 5px 10px; font-size: 11px; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 32px 24px 80px; }
+  .ticket { background: var(--paper); border-radius: var(--radius); padding: 30px 34px; margin-bottom: 22px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+  h1 { font-size: 25px; margin: 0 0 4px; }
+  h2 { font-size: 16px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft); margin: 0 0 16px; border-bottom: 1px dashed var(--line); padding-bottom: 10px; }
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--gold); margin-bottom: 6px; }
+  .lead { color: var(--ink-soft); margin: 0 0 20px; }
+  .tabs { display:flex; gap: 4px; margin-bottom: 22px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .tab { font-family: var(--mono); font-size: 12px; text-transform: uppercase; padding: 10px 16px; cursor: pointer; color: var(--ink-soft); border-bottom: 2px solid transparent; }
+  .tab.active { color: var(--espresso); border-bottom-color: var(--gold); font-weight: bold; }
+  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 8px; }
+  @media (max-width: 800px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
+  .stat-card { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
+  .stat-num { font-size: 26px; font-weight: bold; color: var(--espresso); }
+  .stat-label { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); text-transform: uppercase; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-family: var(--mono); font-size: 11px; text-transform: uppercase; color: var(--ink-soft); padding: 8px; border-bottom: 1px solid var(--line); }
+  td { padding: 10px 8px; border-bottom: 1px dashed var(--line); font-size: 14px; }
+  tr:hover td { background: var(--crema); cursor: pointer; }
+  .pill { font-family: var(--mono); font-size: 10px; padding: 2px 8px; border-radius: 12px; text-transform: uppercase; }
+  .pill.ok { background: rgba(61,107,74,0.12); color: var(--ok); }
+  .pill.warn { background: rgba(192,138,46,0.12); color: var(--gold); }
+  .pill.error { background: rgba(166,61,47,0.12); color: var(--error); }
+  .status-open { background: rgba(192,138,46,0.15); color: var(--gold); }
+  .status-in_progress { background: rgba(45,110,140,0.15); color: var(--info); }
+  .status-resolved { background: rgba(61,107,74,0.15); color: var(--ok); }
+  .empty { padding: 40px 20px; text-align: center; color: var(--ink-soft); font-style: italic; }
+  .center-screen { min-height: 80vh; display: flex; align-items: center; justify-content: center; }
+  .login-card { width: 360px; }
+  input, textarea, select { width: 100%; font-family: Georgia, serif; font-size: 15px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; color: var(--ink); }
+  label { display: block; font-family: var(--mono); font-size: 12px; color: var(--ink-soft); margin: 14px 0 5px; }
+  .msg { font-family: var(--mono); font-size: 13px; padding: 10px 14px; border-radius: var(--radius); margin-bottom: 16px; }
+  .msg.error { background: rgba(166,61,47,0.1); color: var(--error); border: 1px solid rgba(166,61,47,0.3); }
+  .hidden { display: none !important; }
+  .back-link { font-family: var(--mono); font-size: 12px; color: var(--gold); cursor: pointer; text-decoration: underline; margin-bottom: 16px; display: inline-block; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand">Tabl<span>0</span> · Admin</div>
+  <div id="topbar-right"></div>
+</div>
+<div class="wrap" id="app-root"></div>
+
+<script>
+const SUPABASE_URL = 'https://yhrhqfqdxtgifahvkrnw.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_N91RJWdVtL5LgpB7u5uLAA_3NcHqYtt';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let state = {
+  user: null, view: 'loading', isAdmin: false,
+  tab: 'overview', overview: null, tenants: [], tickets: [],
+  detailTenant: null,
+};
+const root = document.getElementById('app-root');
+const topbarRight = document.getElementById('topbar-right');
+
+async function boot() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) { state.user = session.user; await checkAdmin(); }
+  else { state.view = 'login'; render(); }
+}
+boot();
+
+async function checkAdmin() {
+  const { data } = await sb.rpc('get_admin_overview');
+  if (data && !data.error) {
+    state.isAdmin = true;
+    state.overview = data;
+    state.view = 'dashboard';
+    await loadTenants();
+  } else {
+    state.isAdmin = false;
+    state.view = 'denied';
+  }
+  render();
+}
+
+async function loadTenants() {
+  const { data } = await sb.rpc('get_admin_tenants');
+  state.tenants = data || [];
+}
+async function loadTickets() {
+  const { data } = await sb.rpc('get_admin_support_tickets');
+  state.tickets = data || [];
+}
+
+async function doLogin() {
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  if (!email || !password) return showMsg('Enter both email and password.');
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) return showMsg(error.message);
+  state.user = data.session.user;
+  await checkAdmin();
+}
+function showMsg(text) {
+  const el = document.getElementById('login-msg');
+  if (el) { el.textContent = text; el.classList.remove('hidden'); }
+}
+async function doLogout() { await sb.auth.signOut(); state.user = null; state.view = 'login'; render(); }
+
+function money(n) { return Number(n || 0).toFixed(2); }
+function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+function render() {
+  if (state.view === 'login') return renderLogin();
+  if (state.view === 'denied') return renderDenied();
+  if (state.view === 'dashboard') return renderDashboard();
+  root.innerHTML = '<div class="center-screen">Loading…</div>';
+}
+
+function renderLogin() {
+  topbarRight.innerHTML = '';
+  root.innerHTML = `
+    <div class="center-screen">
+      <div class="ticket login-card">
+        <div class="eyebrow">Platform Admin</div>
+        <h1>Sign in</h1>
+        <p class="lead">Restricted to Tabl0 platform administrators.</p>
+        <div id="login-msg" class="msg error hidden"></div>
+        <label>Email</label><input id="email" type="email" />
+        <label>Password</label><input id="password" type="password" />
+        <button class="btn btn-solid" style="margin-top:18px;width:100%" onclick="doLogin()">Sign in</button>
+      </div>
+    </div>`;
+}
+
+function renderDenied() {
+  topbarRight.innerHTML = `<button class="btn" onclick="doLogout()">Sign out</button>`;
+  root.innerHTML = `
+    <div class="center-screen">
+      <div class="ticket" style="text-align:center;max-width:400px">
+        <h1>Not authorized</h1>
+        <p class="lead">This account (${escapeHtml(state.user.email)}) doesn't have platform admin access.</p>
+      </div>
+    </div>`;
+}
+
+function renderDashboard() {
+  topbarRight.innerHTML = `<span class="userline">${escapeHtml(state.user.email)}</span> <button class="btn" onclick="doLogout()" style="margin-left:12px">Sign out</button>`;
+  root.innerHTML = `
+    <div class="tabs">
+      ${['overview','businesses','support','reports'].map(t => `<div class="tab ${state.tab===t?'active':''}" onclick="switchTab('${t}')">${t}</div>`).join('')}
+    </div>
+    <div id="tab-body"></div>`;
+  const body = document.getElementById('tab-body');
+  if (state.tab === 'overview') body.innerHTML = renderOverview();
+  if (state.tab === 'businesses') body.innerHTML = state.detailTenant ? renderTenantDetail() : renderBusinesses();
+  if (state.tab === 'support') body.innerHTML = renderSupport();
+  if (state.tab === 'reports') renderReportsTab();
+}
+async function switchTab(t) {
+  state.tab = t; state.detailTenant = null;
+  if (t === 'support' && state.tickets.length === 0) await loadTickets();
+  render();
+}
+
+function renderOverview() {
+  const o = state.overview;
+  return `
+    <div class="ticket">
+      <h2>Platform overview</h2>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-num">${o.total_tenants}</div><div class="stat-label">Registered businesses</div></div>
+        <div class="stat-card"><div class="stat-num">${o.active_tenants}</div><div class="stat-label">Active</div></div>
+        <div class="stat-card"><div class="stat-num">${o.new_tenants_last_7_days}</div><div class="stat-label">New this week</div></div>
+        <div class="stat-card"><div class="stat-num">${o.total_customers}</div><div class="stat-label">Total customers</div></div>
+        <div class="stat-card"><div class="stat-num">${o.orders_today}</div><div class="stat-label">Orders today</div></div>
+        <div class="stat-card"><div class="stat-num">${money(o.revenue_today)} EGP</div><div class="stat-label">Revenue today</div></div>
+        <div class="stat-card"><div class="stat-num">${o.orders_last_7_days}</div><div class="stat-label">Orders, 7 days</div></div>
+        <div class="stat-card"><div class="stat-num">${money(o.total_revenue_all_time)} EGP</div><div class="stat-label">All-time revenue</div></div>
+        <div class="stat-card"><div class="stat-num">${o.total_orders_all_time}</div><div class="stat-label">All-time orders</div></div>
+        <div class="stat-card"><div class="stat-num">${o.tenants_with_payouts_verified}</div><div class="stat-label">Payouts verified</div></div>
+        <div class="stat-card"><div class="stat-num">${o.tenants_with_loyalty_enabled}</div><div class="stat-label">Loyalty enabled</div></div>
+        <div class="stat-card"><div class="stat-num">${o.open_support_tickets}</div><div class="stat-label">Open support tickets</div></div>
+      </div>
+    </div>`;
+}
+
+function renderBusinesses() {
+  return `
+    <div class="ticket">
+      <h2>Registered businesses (${state.tenants.length})</h2>
+      ${state.tenants.length === 0 ? '<div class="empty">No businesses registered yet.</div>' : `
+        <table>
+          <thead><tr><th>Name</th><th>Owner</th><th>Orders</th><th>Revenue</th><th>Payouts</th><th>Status</th><th>Joined</th></tr></thead>
+          <tbody>
+            ${state.tenants.map(t => `
+              <tr onclick="openTenantDetail('${t.id}')">
+                <td><strong>${escapeHtml(t.name)}</strong><br><span style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${escapeHtml(t.slug)}</span></td>
+                <td>${escapeHtml(t.owner_email || '—')}</td>
+                <td>${t.order_count}</td>
+                <td>${money(t.total_revenue)} ${escapeHtml(t.currency)}</td>
+                <td><span class="pill ${t.stripe_connect_status==='verified'?'ok':'warn'}">${escapeHtml(t.stripe_connect_status)}</span></td>
+                <td><span class="pill ${t.active?'ok':'error'}">${t.active?'active':'inactive'}</span></td>
+                <td style="font-family:var(--mono);font-size:12px">${new Date(t.created_at).toLocaleDateString()}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>`;
+}
+
+async function openTenantDetail(id) {
+  const { data } = await sb.rpc('get_admin_tenant_detail', { p_tenant_id: id });
+  state.detailTenant = data;
+  render();
+}
+function backToBusinesses() { state.detailTenant = null; render(); }
+
+function renderTenantDetail() {
+  const d = state.detailTenant;
+  const t = d.tenant;
+  return `
+    <div class="ticket">
+      <span class="back-link" onclick="backToBusinesses()">← All businesses</span>
+      <h1>${escapeHtml(t.name)}</h1>
+      <p class="lead">${escapeHtml(t.slug)} · Owner: ${escapeHtml(d.owner_email || '—')} · Joined ${new Date(t.created_at).toLocaleDateString()}</p>
+
+      <h2 style="margin-top:24px">Staff (${d.staff.length})</h2>
+      ${d.staff.length === 0 ? '<div class="small">No staff added</div>' : d.staff.map(s => `
+        <div style="padding:6px 0;border-bottom:1px dashed var(--line)">${escapeHtml(s.email)} <span class="pill warn">${escapeHtml(s.role)}</span></div>
+      `).join('')}
+
+      <h2 style="margin-top:24px">Recent orders (${d.recent_orders.length})</h2>
+      ${d.recent_orders.length === 0 ? '<div class="small">No orders yet</div>' : `
+        <table>
+          <thead><tr><th>Order</th><th>Status</th><th>Total</th><th>Date</th></tr></thead>
+          <tbody>
+            ${d.recent_orders.map(o => `
+              <tr><td style="font-family:var(--mono);font-size:12px">#${o.id.slice(0,8)}</td>
+                  <td><span class="pill ok">${escapeHtml(o.status)}</span></td>
+                  <td>${money(o.total)} EGP</td>
+                  <td style="font-family:var(--mono);font-size:12px">${new Date(o.created_at).toLocaleString()}</td></tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>`;
+}
+
+function renderSupport() {
+  return `
+    <div class="ticket">
+      <h2>Support tickets (${state.tickets.length})</h2>
+      ${state.tickets.length === 0 ? '<div class="empty">No support tickets yet.</div>' : state.tickets.map(tk => `
+        <div style="border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:14px;background:#fff">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <strong>${escapeHtml(tk.subject)}</strong>
+            <span class="pill status-${tk.status}">${escapeHtml(tk.status.replace('_',' '))}</span>
+          </div>
+          <div class="small" style="margin-bottom:8px">${escapeHtml(tk.tenant_name)} · ${escapeHtml(tk.created_by_email || '')} · ${new Date(tk.created_at).toLocaleString()}</div>
+          <p style="margin-bottom:12px">${escapeHtml(tk.message)}</p>
+          ${tk.admin_response ? `<div style="background:var(--crema);padding:10px;border-radius:var(--radius);margin-bottom:10px"><strong>Response:</strong> ${escapeHtml(tk.admin_response)}</div>` : ''}
+          <div class="row" style="display:flex;gap:8px">
+            <input id="resp-${tk.id}" placeholder="Write a response…" value="${escapeHtml(tk.admin_response||'')}" style="flex:1"/>
+            <select id="status-${tk.id}" style="flex:0 0 140px">
+              <option value="open" ${tk.status==='open'?'selected':''}>Open</option>
+              <option value="in_progress" ${tk.status==='in_progress'?'selected':''}>In progress</option>
+              <option value="resolved" ${tk.status==='resolved'?'selected':''}>Resolved</option>
+            </select>
+            <button class="btn btn-sm btn-solid" onclick="respondToTicket('${tk.id}')">Save</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>`;
+}
+async function respondToTicket(id) {
+  const response = document.getElementById('resp-' + id).value;
+  const status = document.getElementById('status-' + id).value;
+  await sb.rpc('admin_respond_to_ticket', { p_ticket_id: id, p_response: response, p_status: status });
+  await loadTickets();
+  render();
+}
+
+// ============================================================
+// PLATFORM-WIDE REPORTS
+// ============================================================
+let adminReportState = { rangeLabel: 'Today', start: null, end: null, orders: [], loaded: false, tenantFilter: '' };
+
+function setAdminReportRange(label) {
+  const now = new Date();
+  let start, end;
+  if (label === 'Today') { start = new Date(now.getFullYear(), now.getMonth(), now.getDate()); end = new Date(start); end.setDate(end.getDate()+1); }
+  else if (label === 'This Week') { const d = now.getDay(); start = new Date(now.getFullYear(), now.getMonth(), now.getDate()-d); end = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1); }
+  else if (label === 'This Month') { start = new Date(now.getFullYear(), now.getMonth(), 1); end = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1); }
+  else if (label === 'This Year') { start = new Date(now.getFullYear(), 0, 1); end = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1); }
+  adminReportState.rangeLabel = label; adminReportState.start = start; adminReportState.end = end;
+  generateAdminReport();
+}
+function toDatetimeLocalValue(d) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function applyCustomAdminReportRange() {
+  const s = document.getElementById('admin-report-start').value, e = document.getElementById('admin-report-end').value;
+  if (!s || !e) return;
+  adminReportState.rangeLabel = 'Custom range'; adminReportState.start = new Date(s); adminReportState.end = new Date(e);
+  generateAdminReport();
+}
+async function generateAdminReport() {
+  adminReportState.loaded = false;
+  renderReportsTab();
+  const { data } = await sb.rpc('get_admin_orders_report', {
+    p_start: adminReportState.start.toISOString(), p_end: adminReportState.end.toISOString(), p_tenant_id: null
+  });
+  adminReportState.orders = data || [];
+  adminReportState.loaded = true;
+  renderReportsTab();
+}
+function computeAdminStats(orders) {
+  const valid = orders.filter(o => o.status !== 'cancelled');
+  const grossSales = valid.reduce((s,o) => s + Number(o.subtotal||0), 0);
+  const totalDiscounts = valid.reduce((s,o) => s + Number(o.reward_discount||0), 0);
+  const netSales = valid.reduce((s,o) => s + Number(o.total||0), 0);
+  const byTenant = {};
+  valid.forEach(o => {
+    if (!byTenant[o.tenant_name]) byTenant[o.tenant_name] = { name: o.tenant_name, orders: 0, revenue: 0 };
+    byTenant[o.tenant_name].orders += 1;
+    byTenant[o.tenant_name].revenue += Number(o.total||0);
+  });
+  return { grossSales, totalDiscounts, netSales, orderCount: valid.length, avgOrderValue: valid.length ? netSales/valid.length : 0,
+    cancelledCount: orders.length - valid.length, byTenant: Object.values(byTenant).sort((a,b)=>b.revenue-a.revenue) };
+}
+function renderReportsTab() {
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+  if (!adminReportState.start) { setAdminReportRange('Today'); return; }
+  const stats = adminReportState.loaded ? computeAdminStats(adminReportState.orders) : null;
+  body.innerHTML = `
+    <div class="ticket">
+      <h2>Platform-wide report</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${['Today','This Week','This Month','This Year'].map(l => `<button class="btn btn-sm ${adminReportState.rangeLabel===l?'btn-solid':''}" onclick="setAdminReportRange('${l}')">${l}</button>`).join('')}
+      </div>
+      <hr style="border:none;border-top:1px dashed var(--line);margin:16px 0"/>
+      <div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap">
+        <div><label>From</label><input id="admin-report-start" type="datetime-local" value="${adminReportState.start?toDatetimeLocalValue(adminReportState.start):''}"/></div>
+        <div><label>To</label><input id="admin-report-end" type="datetime-local" value="${adminReportState.end?toDatetimeLocalValue(adminReportState.end):''}"/></div>
+        <button class="btn btn-sm" onclick="applyCustomAdminReportRange()">Apply</button>
+      </div>
+    </div>
+    ${!adminReportState.loaded ? '<div class="ticket"><div class="empty">Generating…</div></div>' : `
+      <div class="ticket">
+        <h2>${escapeHtml(adminReportState.rangeLabel)}</h2>
+        <div class="stat-grid">
+          <div class="stat-card"><div class="stat-num">${money(stats.grossSales)}</div><div class="stat-label">Gross sales (EGP)</div></div>
+          <div class="stat-card"><div class="stat-num">${money(stats.netSales)}</div><div class="stat-label">Net sales (EGP)</div></div>
+          <div class="stat-card"><div class="stat-num">${stats.orderCount}</div><div class="stat-label">Orders</div></div>
+          <div class="stat-card"><div class="stat-num">${money(stats.avgOrderValue)}</div><div class="stat-label">Avg order value</div></div>
+        </div>
+        <div style="text-align:right;margin-top:12px">
+          <button class="btn btn-sm" onclick="exportAdminReportExcel()">📊 Export Excel</button>
+          <button class="btn btn-sm" onclick="exportAdminReportPdf()">📄 Export PDF</button>
+        </div>
+      </div>
+      <div class="ticket">
+        <h2>Revenue by business</h2>
+        <table><thead><tr><th>Business</th><th>Orders</th><th>Revenue</th></tr></thead>
+        <tbody>${stats.byTenant.map(t => `<tr><td>${escapeHtml(t.name)}</td><td>${t.orders}</td><td>${money(t.revenue)} EGP</td></tr>`).join('')}</tbody></table>
+      </div>
+    `}
+  `;
+}
+function exportAdminReportExcel() {
+  const stats = computeAdminStats(adminReportState.orders);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['Tabl0 Platform Report'], ['Range', adminReportState.rangeLabel],
+    ['From', adminReportState.start.toLocaleString()], ['To', adminReportState.end.toLocaleString()],
+    [], ['Gross Sales (EGP)', stats.grossSales.toFixed(2)], ['Net Sales (EGP)', stats.netSales.toFixed(2)],
+    ['Order Count', stats.orderCount], ['Average Order Value', stats.avgOrderValue.toFixed(2)]
+  ]), 'Summary');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Business','Orders','Revenue (EGP)'], ...stats.byTenant.map(t=>[t.name,t.orders,t.revenue.toFixed(2)])]), 'By Business');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['Order ID','Business','Table','Status','Subtotal','Discount','Total','Date'],
+    ...adminReportState.orders.map(o => [o.id, o.tenant_name, o.table_code||'', o.status, Number(o.subtotal||0).toFixed(2), Number(o.reward_discount||0).toFixed(2), Number(o.total||0).toFixed(2), new Date(o.created_at).toLocaleString()])
+  ]), 'Order Detail');
+  XLSX.writeFile(wb, `Tabl0_Platform_Report_${adminReportState.rangeLabel.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+function exportAdminReportPdf() {
+  const stats = computeAdminStats(adminReportState.orders);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(16); doc.text('Tabl0 Platform Report', 14, 18);
+  doc.setFontSize(10); doc.text(`Range: ${adminReportState.rangeLabel}`, 14, 26);
+  doc.autoTable({ startY: 34, head: [['Metric','Value']], body: [
+    ['Gross sales', money(stats.grossSales)+' EGP'], ['Net sales', money(stats.netSales)+' EGP'],
+    ['Order count', String(stats.orderCount)], ['Average order value', money(stats.avgOrderValue)+' EGP']
+  ], theme: 'grid', headStyles: { fillColor: [43,29,20] } });
+  doc.autoTable({ startY: doc.lastAutoTable.finalY+10, head: [['Business','Orders','Revenue']],
+    body: stats.byTenant.map(t=>[t.name,t.orders,money(t.revenue)]), theme: 'striped', headStyles: { fillColor: [43,29,20] } });
+  doc.save(`Tabl0_Platform_Report_${adminReportState.rangeLabel.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.pdf`);
+}
+</script>
+</body>
+</html>
