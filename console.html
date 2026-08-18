@@ -6,6 +6,9 @@
 <title>Café Console</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 <style>
   :root {
     --espresso: #2B1D14;
@@ -138,6 +141,7 @@
   .status-preparing { background: rgba(61,107,74,0.15); color: var(--ok); }
   .status-ready { background: rgba(45,110,140,0.15); color: var(--info); }
   .status-served { background: rgba(107,91,71,0.15); color: var(--ink-soft); }
+  .status-cancelled { background: rgba(166,61,47,0.15); color: var(--error); }
 
   .center-screen { min-height: 80vh; display:flex; align-items:center; justify-content:center; }
   .login-card { width: 360px; }
@@ -679,6 +683,15 @@ async function updateOrderStatus(orderId, status) {
   render();
 }
 
+async function cancelOrder(orderId) {
+  const reason = prompt('Reason for cancelling this order (required — shows up in reports for reconciliation):');
+  if (reason === null) return; // user hit Cancel on the prompt itself
+  if (!reason.trim()) { alert('A reason is required to cancel an order.'); return; }
+  await sb.from('orders').update({ status: 'cancelled', cancellation_reason: reason.trim(), cancelled_by: state.user.id }).eq('id', orderId);
+  await loadOrders();
+  render();
+}
+
 // ============================================================
 // RENDERING
 // ============================================================
@@ -893,7 +906,7 @@ function renderHome() {
   topbarRight.innerHTML = `<span class="userline">${escapeHtml(state.tenant.name)} · ${state.user.email}</span><button class="btn" onclick="handleLogout()">Sign out</button>`;
   root.innerHTML = `
     <div class="tabs">
-      ${['orders','menu','tables','loyalty','settings'].map(t => `
+      ${['orders','menu','tables','loyalty','reports','settings','support'].map(t => `
         <div class="tab ${state.homeTab === t ? 'active' : ''}" onclick="switchTab('${t}')">${t}</div>
       `).join('')}
     </div>
@@ -905,9 +918,331 @@ function renderHome() {
   if (state.homeTab === 'tables') body.innerHTML = renderTablesTab();
   if (state.homeTab === 'loyalty') body.innerHTML = renderLoyaltyTab();
   if (state.homeTab === 'settings') body.innerHTML = renderSettingsTab();
+  if (state.homeTab === 'reports') renderReportsTab();
+  if (state.homeTab === 'support') { renderSupportTab(); loadMyTickets(); }
   if (state.homeTab === 'tables') state.tables.forEach(renderQr);
 }
 function switchTab(t) { state.homeTab = t; state.expandedItemId = null; render(); }
+
+let myTickets = [];
+async function loadMyTickets() {
+  const { data } = await sb.from('support_tickets').select('*').eq('tenant_id', state.tenant.id).order('created_at', { ascending: false });
+  myTickets = data || [];
+  renderSupportTab();
+}
+// ============================================================
+// REPORTS — shift/day/week/month/year order reports with Excel/PDF export
+// ============================================================
+let reportState = {
+  rangeLabel: 'Today',
+  start: null,
+  end: null,
+  orders: [],
+  loaded: false
+};
+
+function setReportRange(label) {
+  const now = new Date();
+  let start, end;
+  if (label === 'Today') {
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    end = new Date(start); end.setDate(end.getDate() + 1);
+  } else if (label === 'Yesterday') {
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    start = new Date(end); start.setDate(start.getDate() - 1);
+  } else if (label === 'This Week') {
+    const day = now.getDay();
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day);
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  } else if (label === 'This Month') {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  } else if (label === 'This Year') {
+    start = new Date(now.getFullYear(), 0, 1);
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  }
+  reportState.rangeLabel = label;
+  reportState.start = start;
+  reportState.end = end;
+  generateReport();
+}
+
+function toDatetimeLocalValue(d) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function applyCustomReportRange() {
+  const startVal = document.getElementById('report-start').value;
+  const endVal = document.getElementById('report-end').value;
+  if (!startVal || !endVal) return;
+  reportState.rangeLabel = 'Custom range';
+  reportState.start = new Date(startVal);
+  reportState.end = new Date(endVal);
+  generateReport();
+}
+
+async function generateReport() {
+  reportState.loaded = false;
+  renderReportsTab();
+  const { data: orders } = await sb.from('orders').select('*')
+    .eq('tenant_id', state.tenant.id)
+    .gte('created_at', reportState.start.toISOString())
+    .lt('created_at', reportState.end.toISOString())
+    .order('created_at');
+  const orderIds = (orders || []).map(o => o.id);
+  let items = [];
+  if (orderIds.length > 0) {
+    const { data: itemRows } = await sb.from('order_items').select('*').in('order_id', orderIds);
+    items = itemRows || [];
+  }
+  reportState.orders = (orders || []).map(o => ({ ...o, items: items.filter(i => i.order_id === o.id) }));
+  reportState.loaded = true;
+  renderReportsTab();
+}
+
+function computeReportStats(orders) {
+  const validOrders = orders.filter(o => o.status !== 'cancelled');
+  const grossSales = validOrders.reduce((s, o) => s + Number(o.subtotal || 0), 0);
+  const totalDiscounts = validOrders.reduce((s, o) => s + Number(o.reward_discount || 0), 0);
+  const netSales = validOrders.reduce((s, o) => s + Number(o.total || 0), 0);
+  const orderCount = validOrders.length;
+  const avgOrderValue = orderCount ? netSales / orderCount : 0;
+  const cancelledCount = orders.length - validOrders.length;
+  const rewardOrders = validOrders.filter(o => Number(o.reward_discount || 0) > 0).length;
+
+  const statusCounts = {};
+  orders.forEach(o => { statusCounts[o.status] = (statusCounts[o.status] || 0) + 1; });
+
+  const itemMap = {};
+  validOrders.forEach(o => o.items.forEach(i => {
+    if (!itemMap[i.item_name]) itemMap[i.item_name] = { name: i.item_name, qty: 0, revenue: 0 };
+    itemMap[i.item_name].qty += i.quantity;
+    itemMap[i.item_name].revenue += Number(i.line_total || 0);
+  }));
+  const itemBreakdown = Object.values(itemMap).sort((a, b) => b.revenue - a.revenue);
+
+  const hourMap = {};
+  validOrders.forEach(o => {
+    const h = new Date(o.created_at).getHours();
+    hourMap[h] = (hourMap[h] || 0) + 1;
+  });
+
+  return { grossSales, totalDiscounts, netSales, orderCount, avgOrderValue, cancelledCount, rewardOrders, statusCounts, itemBreakdown, hourMap };
+}
+
+function renderReportsTab() {
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+  if (!reportState.start) { setReportRange('Today'); return; }
+
+  const stats = reportState.loaded ? computeReportStats(reportState.orders) : null;
+
+  body.innerHTML = `
+    <div class="ticket">
+      <h2>Generate report</h2>
+      <div class="row" style="flex-wrap:wrap;gap:8px">
+        ${['Today','Yesterday','This Week','This Month','This Year'].map(l => `
+          <button class="btn btn-sm ${reportState.rangeLabel===l?'btn-solid':''}" onclick="setReportRange('${l}')">${l}</button>
+        `).join('')}
+      </div>
+      <hr class="divider"/>
+      <p class="small">Or set a custom range — useful for a single shift (e.g. 6:00 AM–2:00 PM):</p>
+      <div class="row">
+        <div><label>From</label><input id="report-start" type="datetime-local" value="${reportState.start ? toDatetimeLocalValue(reportState.start) : ''}"/></div>
+        <div><label>To</label><input id="report-end" type="datetime-local" value="${reportState.end ? toDatetimeLocalValue(reportState.end) : ''}"/></div>
+        <div style="flex:0 0 auto"><button class="btn btn-sm" style="margin-top:14px" onclick="applyCustomReportRange()">Apply</button></div>
+      </div>
+    </div>
+
+    ${!reportState.loaded ? '<div class="ticket"><div class="empty">Generating report…</div></div>' : `
+      <div class="ticket">
+        <h2>${escapeHtml(reportState.rangeLabel)} — ${reportState.start.toLocaleString()} to ${reportState.end.toLocaleString()}</h2>
+        <div class="grid2" style="grid-template-columns:repeat(4,1fr);gap:12px">
+          <div class="qr-box" style="padding:12px"><div style="font-size:22px;font-weight:bold">${money(stats.grossSales)}</div><div class="small">Gross sales (EGP)</div></div>
+          <div class="qr-box" style="padding:12px"><div style="font-size:22px;font-weight:bold;color:var(--ok)">${money(stats.totalDiscounts)}</div><div class="small">Loyalty discounts given</div></div>
+          <div class="qr-box" style="padding:12px"><div style="font-size:22px;font-weight:bold">${money(stats.netSales)}</div><div class="small">Net sales / to reconcile (EGP)</div></div>
+          <div class="qr-box" style="padding:12px"><div style="font-size:22px;font-weight:bold">${stats.orderCount}</div><div class="small">Orders</div></div>
+          <div class="qr-box" style="padding:12px"><div style="font-size:22px;font-weight:bold">${money(stats.avgOrderValue)}</div><div class="small">Avg order value (EGP)</div></div>
+          <div class="qr-box" style="padding:12px"><div style="font-size:22px;font-weight:bold">${stats.rewardOrders}</div><div class="small">Orders with reward redeemed</div></div>
+          <div class="qr-box" style="padding:12px"><div style="font-size:22px;font-weight:bold;color:var(--error)">${stats.cancelledCount}</div><div class="small">Cancelled orders</div></div>
+          <div class="qr-box" style="padding:12px"><div style="font-size:22px;font-weight:bold">${Object.values(stats.statusCounts).reduce((a,b)=>a+b,0)}</div><div class="small">Total records in range</div></div>
+        </div>
+        <div class="nav-actions" style="margin-top:18px">
+          <span class="small">${reportState.orders.length} order${reportState.orders.length===1?'':'s'} in range</span>
+          <div>
+            <button class="btn btn-sm" onclick="exportReportExcel()">📊 Export Excel</button>
+            <button class="btn btn-sm" onclick="exportReportPdf()">📄 Export PDF</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="ticket">
+        <h2>Sales by item</h2>
+        ${stats.itemBreakdown.length === 0 ? '<div class="empty">No items sold in this range.</div>' : `
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr><th style="text-align:left;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Item</th><th style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Qty sold</th><th style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Revenue</th></tr></thead>
+            <tbody>
+              ${stats.itemBreakdown.map(i => `<tr><td style="padding:6px;border-bottom:1px dashed var(--line)">${escapeHtml(i.name)}</td><td style="text-align:right;padding:6px;border-bottom:1px dashed var(--line)">${i.qty}</td><td style="text-align:right;padding:6px;border-bottom:1px dashed var(--line)">${money(i.revenue)} EGP</td></tr>`).join('')}
+            </tbody>
+          </table>
+        `}
+      </div>
+
+      ${stats.cancelledCount > 0 ? `
+      <div class="ticket">
+        <h2>Cancelled orders (${stats.cancelledCount})</h2>
+        <p class="small" style="margin-bottom:10px">Every cancellation requires a reason — review these against your own records to catch any discrepancy.</p>
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr><th style="text-align:left;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Order</th><th style="text-align:left;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Time</th><th style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Would-be total</th><th style="text-align:left;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Reason</th></tr></thead>
+          <tbody>
+            ${reportState.orders.filter(o => o.status === 'cancelled').map(o => `
+              <tr><td style="padding:6px;border-bottom:1px dashed var(--line);font-family:var(--mono);font-size:12px">#${o.id.slice(0,8)}</td>
+                  <td style="padding:6px;border-bottom:1px dashed var(--line);font-family:var(--mono);font-size:12px">${new Date(o.created_at).toLocaleString()}</td>
+                  <td style="text-align:right;padding:6px;border-bottom:1px dashed var(--line)">${money(o.total)} EGP</td>
+                  <td style="padding:6px;border-bottom:1px dashed var(--line)">${escapeHtml(o.cancellation_reason || '—')}</td></tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
+    `}
+  `;
+}
+
+function exportReportExcel() {
+  const stats = computeReportStats(reportState.orders);
+  const wb = XLSX.utils.book_new();
+
+  const summaryData = [
+    ['Tabl0 Order Report'],
+    ['Café', state.tenant.name],
+    ['Range', reportState.rangeLabel],
+    ['From', reportState.start.toLocaleString()],
+    ['To', reportState.end.toLocaleString()],
+    ['Generated', new Date().toLocaleString()],
+    [],
+    ['Gross Sales (EGP)', stats.grossSales.toFixed(2)],
+    ['Loyalty Discounts Given (EGP)', stats.totalDiscounts.toFixed(2)],
+    ['Net Sales / To Reconcile (EGP)', stats.netSales.toFixed(2)],
+    ['Order Count', stats.orderCount],
+    ['Average Order Value (EGP)', stats.avgOrderValue.toFixed(2)],
+    ['Orders With Reward Redeemed', stats.rewardOrders],
+    ['Cancelled Orders', stats.cancelledCount],
+  ];
+  const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
+
+  const itemRows = [['Item', 'Quantity Sold', 'Revenue (EGP)']];
+  stats.itemBreakdown.forEach(i => itemRows.push([i.name, i.qty, i.revenue.toFixed(2)]));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(itemRows), 'Sales by Item');
+
+  const orderRows = [['Order ID', 'Date/Time', 'Table', 'Status', 'Payment Status', 'Items', 'Subtotal', 'Discount', 'Total', 'Cancellation Reason', 'Notes']];
+  reportState.orders.forEach(o => {
+    const itemsSummary = o.items.map(i => `${i.quantity}x ${i.item_name}`).join('; ');
+    orderRows.push([
+      o.id, new Date(o.created_at).toLocaleString(), o.table_id ? o.table_id.slice(0,8) : '',
+      o.status, o.payment_status, itemsSummary,
+      Number(o.subtotal || 0).toFixed(2), Number(o.reward_discount || 0).toFixed(2), Number(o.total || 0).toFixed(2),
+      o.cancellation_reason || '', o.notes || ''
+    ]);
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(orderRows), 'Order Detail');
+
+  const cancelledOrders = reportState.orders.filter(o => o.status === 'cancelled');
+  if (cancelledOrders.length > 0) {
+    const cancelRows = [['Order ID', 'Date/Time', 'Would-be Total', 'Reason']];
+    cancelledOrders.forEach(o => cancelRows.push([o.id, new Date(o.created_at).toLocaleString(), Number(o.total||0).toFixed(2), o.cancellation_reason || '']));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cancelRows), 'Cancelled Orders');
+  }
+
+  const filename = `Tabl0_Report_${state.tenant.slug}_${reportState.rangeLabel.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`;
+  XLSX.writeFile(wb, filename);
+}
+
+function exportReportPdf() {
+  const stats = computeReportStats(reportState.orders);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+
+  doc.setFontSize(16);
+  doc.text('Tabl0 Order Report', 14, 18);
+  doc.setFontSize(10);
+  doc.text(`Café: ${state.tenant.name}`, 14, 26);
+  doc.text(`Range: ${reportState.rangeLabel} (${reportState.start.toLocaleString()} – ${reportState.end.toLocaleString()})`, 14, 32);
+  doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 38);
+
+  doc.autoTable({
+    startY: 46,
+    head: [['Metric', 'Value']],
+    body: [
+      ['Gross sales', money(stats.grossSales) + ' EGP'],
+      ['Loyalty discounts given', money(stats.totalDiscounts) + ' EGP'],
+      ['Net sales / to reconcile', money(stats.netSales) + ' EGP'],
+      ['Order count', String(stats.orderCount)],
+      ['Average order value', money(stats.avgOrderValue) + ' EGP'],
+      ['Orders with reward redeemed', String(stats.rewardOrders)],
+      ['Cancelled orders', String(stats.cancelledCount)],
+    ],
+    theme: 'grid', headStyles: { fillColor: [43, 29, 20] }
+  });
+
+  doc.autoTable({
+    startY: doc.lastAutoTable.finalY + 10,
+    head: [['Item', 'Qty', 'Revenue (EGP)']],
+    body: stats.itemBreakdown.map(i => [i.name, i.qty, money(i.revenue)]),
+    theme: 'striped', headStyles: { fillColor: [43, 29, 20] }
+  });
+
+  doc.addPage();
+  doc.setFontSize(14);
+  doc.text('Order Detail', 14, 18);
+  doc.autoTable({
+    startY: 26,
+    head: [['Time', 'Status', 'Items', 'Subtotal', 'Discount', 'Total']],
+    body: reportState.orders.map(o => [
+      new Date(o.created_at).toLocaleString(),
+      o.status,
+      o.items.map(i => `${i.quantity}x ${i.item_name}`).join(', '),
+      money(o.subtotal), money(o.reward_discount), money(o.total)
+    ]),
+    theme: 'grid', headStyles: { fillColor: [43, 29, 20] }, styles: { fontSize: 8 }
+  });
+
+  doc.save(`Tabl0_Report_${state.tenant.slug}_${reportState.rangeLabel.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.pdf`);
+}
+
+function renderSupportTab() {
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="ticket">
+      <h2>Contact support</h2>
+      <div id="support-msg" class="msg hidden"></div>
+      <label>Subject</label><input id="sup-subject" placeholder="e.g. Payout not showing up"/>
+      <label>Message</label><textarea id="sup-message" rows="4" placeholder="Describe the issue…"></textarea>
+      <div class="nav-actions"><span></span><button class="btn btn-solid" onclick="submitTicket()">Send to Tabl0 support</button></div>
+    </div>
+    <div class="ticket">
+      <h2>Your tickets</h2>
+      ${myTickets.length === 0 ? '<div class="empty">No support tickets yet.</div>' : myTickets.map(tk => `
+        <div style="border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between"><strong>${escapeHtml(tk.subject)}</strong><span class="pill ${tk.status==='resolved'?'ok':'warn'}">${escapeHtml(tk.status.replace('_',' '))}</span></div>
+          <p class="small" style="margin-top:6px">${escapeHtml(tk.message)}</p>
+          ${tk.admin_response ? `<div style="background:var(--crema);padding:8px;border-radius:var(--radius);margin-top:8px"><strong>Tabl0 support:</strong> ${escapeHtml(tk.admin_response)}</div>` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+async function submitTicket() {
+  const subject = document.getElementById('sup-subject').value.trim();
+  const message = document.getElementById('sup-message').value.trim();
+  if (!subject || !message) return showMsg('support-msg', 'Subject and message are both required.', 'error');
+  const { error } = await sb.from('support_tickets').insert({ tenant_id: state.tenant.id, subject, message, created_by: state.user.id });
+  if (error) return showMsg('support-msg', error.message, 'error');
+  await loadMyTickets();
+  showMsg('support-msg', 'Sent — we\'ll respond here.', 'ok');
+}
 
 function renderOrdersTab() {
   const payoutStatus = state.tenant.stripe_connect_status || 'not_started';
@@ -929,18 +1264,23 @@ function renderOrderCard(o) {
   const lines = state.orderItems.filter(oi => oi.order_id === o.id);
   const table = state.tables.find(t => t.id === o.table_id);
   const tableLabel = table ? (table.display_name || table.table_code) : o.table_id.slice(0,4);
+  const isCancelled = o.status === 'cancelled';
   return `
     <div style="padding:10px 0;border-bottom:1px dashed var(--line)">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
         <span style="flex:1;font-weight:bold">Table ${escapeHtml(tableLabel)} <span class="small" style="font-weight:normal">· #${o.id.slice(0,8)}</span></span>
         <span class="status-badge status-${o.status}">${o.status}</span>
-        <select onchange="updateOrderStatus('${o.id}', this.value)" style="width:auto">
-          <option value="pending" ${o.status==='pending'?'selected':''}>Pending</option>
-          <option value="preparing" ${o.status==='preparing'?'selected':''}>Preparing</option>
-          <option value="ready" ${o.status==='ready'?'selected':''}>Ready</option>
-          <option value="served" ${o.status==='served'?'selected':''}>Served</option>
-        </select>
+        ${isCancelled ? '' : `
+          <select onchange="updateOrderStatus('${o.id}', this.value)" style="width:auto">
+            <option value="pending" ${o.status==='pending'?'selected':''}>Pending</option>
+            <option value="preparing" ${o.status==='preparing'?'selected':''}>Preparing</option>
+            <option value="ready" ${o.status==='ready'?'selected':''}>Ready</option>
+            <option value="served" ${o.status==='served'?'selected':''}>Served</option>
+          </select>
+          <button class="icon-btn" style="color:var(--error)" onclick="cancelOrder('${o.id}')" title="Cancel this order">✕ Cancel</button>
+        `}
       </div>
+      ${isCancelled && o.cancellation_reason ? `<div class="msg error" style="margin-bottom:8px">Cancelled: ${escapeHtml(o.cancellation_reason)}</div>` : ''}
       ${lines.length === 0 ? '<div class="small">No items recorded for this order</div>' : lines.map(li => `
         <div style="display:flex;justify-content:space-between;padding:3px 0 3px 12px;font-size:13px">
           <span>${li.quantity}× ${escapeHtml(li.item_name)}${renderVariantSummary(li.selected_variants)}</span>
