@@ -168,6 +168,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let state = {
   user: null,
   tenant: null,
+  role: 'owner', // 'owner' | 'staff' | 'kitchen'
   step: 1,
   view: 'loading',
   homeTab: 'orders',
@@ -211,13 +212,36 @@ async function loadTenant() {
   if (error) console.error(error);
   if (data) {
     state.tenant = data;
+    state.role = 'owner';
     state.view = 'home';
     await loadAll();
     subscribeOrders();
-  } else {
-    state.view = 'wizard';
-    state.step = 1;
+    render();
+    return;
   }
+
+  // Not an owner — check staff/kitchen membership
+  const { data: memberships } = await sb.rpc('my_staff_membership');
+  if (memberships && memberships.length > 0) {
+    const m = memberships[0];
+    const { data: tenantRow } = await sb.from('tenants').select('*').eq('id', m.tenant_id).maybeSingle();
+    state.tenant = tenantRow;
+    state.role = m.role;
+    if (m.role === 'kitchen') {
+      state.view = 'kitchen';
+      await loadOrders();
+      subscribeOrdersForKitchen();
+    } else {
+      state.view = 'home';
+      await loadAll();
+      subscribeOrders();
+    }
+    render();
+    return;
+  }
+
+  state.view = 'wizard';
+  state.step = 1;
   render();
 }
 
@@ -265,6 +289,77 @@ async function loadOrders() {
 function subscribeOrders() {
   sb.channel('orders-' + state.tenant.id)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `tenant_id=eq.${state.tenant.id}` }, () => {
+      loadOrders().then(render);
+    })
+    .subscribe();
+}
+
+// ---------- Kitchen: sound + notification alert on NEW orders only ----------
+// Browsers block audio from playing unless it's tied to a real user tap/click —
+// a fresh AudioContext created inside an async Realtime callback (no gesture
+// attached) gets silently blocked, even though the code runs without error.
+// Fix: create ONE AudioContext up front, unlocked by a real tap, then reuse
+// it for every subsequent alert (including ones triggered by Realtime events).
+let alertAudioCtx = null;
+let audioUnlocked = false;
+
+function unlockAudioAlerts() {
+  if (!alertAudioCtx) {
+    alertAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (alertAudioCtx.state === 'suspended') {
+    alertAudioCtx.resume();
+  }
+  audioUnlocked = true;
+  requestNotificationPermission();
+  playAlertSound(); // immediate confirmation beep so staff know it worked
+  render();
+}
+
+function playAlertSound() {
+  if (!alertAudioCtx) return; // not unlocked yet — nothing we can do until a tap happens
+  try {
+    if (alertAudioCtx.state === 'suspended') alertAudioCtx.resume();
+    const now = alertAudioCtx.currentTime;
+    [0, 0.18].forEach((offset, i) => {
+      const osc = alertAudioCtx.createOscillator();
+      const gain = alertAudioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(i === 0 ? 880 : 1046.5, now + offset);
+      gain.gain.setValueAtTime(0.0001, now + offset);
+      gain.gain.exponentialRampToValueAtTime(0.35, now + offset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.32);
+      osc.connect(gain).connect(alertAudioCtx.destination);
+      osc.start(now + offset);
+      osc.stop(now + offset + 0.35);
+    });
+  } catch (e) { console.warn('Could not play alert sound', e); }
+}
+
+function requestNotificationPermission() {
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+}
+
+function showNewOrderNotification(order) {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    const n = new Notification('New order received', {
+      body: `Table order · ${money(order.total || 0)} EGP`,
+      tag: order.id
+    });
+    setTimeout(() => n.close(), 8000);
+  }
+}
+
+function subscribeOrdersForKitchen() {
+  sb.channel('kitchen-orders-' + state.tenant.id)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders', filter: `tenant_id=eq.${state.tenant.id}` }, (payload) => {
+      playAlertSound();
+      showNewOrderNotification(payload.new);
+      loadOrders().then(render);
+    })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `tenant_id=eq.${state.tenant.id}` }, () => {
       loadOrders().then(render);
     })
     .subscribe();
@@ -591,6 +686,7 @@ function render() {
   if (state.view === 'login') return renderLogin();
   if (state.view === 'wizard') return renderWizard();
   if (state.view === 'home') return renderHome();
+  if (state.view === 'kitchen') return renderKitchen();
   root.innerHTML = '<div class="center-screen">Loading…</div>';
   topbarRight.innerHTML = '';
 }
@@ -608,19 +704,40 @@ function renderLogin() {
         <input id="email" type="email" placeholder="owner@yourcafe.com" required />
         <label for="password">Password</label>
         <input id="password" type="password" placeholder="••••••••" required minlength="6" />
+        <div id="invite-code-row" class="hidden">
+          <label for="invite-code">Kitchen invite code</label>
+          <input id="invite-code" placeholder="e.g. 2023D835" />
+        </div>
         <div class="nav-actions">
-          <span class="tab-link" onclick="doSignup()">Create account instead</span>
+          <span class="tab-link" onclick="toggleKitchenSignup()" id="kitchen-toggle-link">I have a kitchen invite code</span>
           <button class="btn btn-solid" onclick="doLogin()">Sign in</button>
+        </div>
+        <div class="nav-actions" style="margin-top:6px">
+          <span class="tab-link" onclick="doSignup()">Create account instead</span>
+          <span></span>
         </div>
       </div>
     </div>
   `;
 }
+let kitchenSignupMode = false;
+function toggleKitchenSignup() {
+  kitchenSignupMode = !kitchenSignupMode;
+  document.getElementById('invite-code-row').classList.toggle('hidden', !kitchenSignupMode);
+  document.getElementById('kitchen-toggle-link').textContent = kitchenSignupMode
+    ? 'Signing in as café owner instead' : 'I have a kitchen invite code';
+}
 function doLogin() {
   const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value;
   if (!email || !password) return showMsg('login-msg', 'Enter both email and password.', 'error');
-  handleLogin(email, password);
+  if (kitchenSignupMode) {
+    const code = document.getElementById('invite-code').value.trim();
+    if (!code) return showMsg('login-msg', 'Enter your kitchen invite code.', 'error');
+    handleKitchenLoginOrSignup(email, password, code);
+  } else {
+    handleLogin(email, password);
+  }
 }
 function doSignup() {
   const email = document.getElementById('email').value.trim();
@@ -628,6 +745,29 @@ function doSignup() {
   if (!email || !password) return showMsg('login-msg', 'Enter both email and password to create an account.', 'error');
   if (password.length < 6) return showMsg('login-msg', 'Password must be at least 6 characters.', 'error');
   handleSignup(email, password);
+}
+
+// Kitchen staff: try sign-in first (existing account), fall back to sign-up,
+// then always redeem the invite code afterward either way.
+async function handleKitchenLoginOrSignup(email, password, code) {
+  let session = null;
+  const signInResult = await sb.auth.signInWithPassword({ email, password });
+  if (signInResult.data && signInResult.data.session) {
+    session = signInResult.data.session;
+  } else {
+    const signUpResult = await sb.auth.signUp({ email, password });
+    if (signUpResult.error) return showMsg('login-msg', signUpResult.error.message, 'error');
+    if (!signUpResult.data.session) {
+      return showMsg('login-msg', 'Check your email to confirm your account, then sign in again with your invite code.', 'ok');
+    }
+    session = signUpResult.data.session;
+  }
+  state.user = session.user;
+  const { data: joinResult, error } = await sb.rpc('join_tenant_as_staff', { p_invite_code: code });
+  if (error || (joinResult && joinResult.error)) {
+    return showMsg('login-msg', 'That invite code doesn\'t look right. Ask your café owner to confirm it.', 'error');
+  }
+  await loadTenant();
 }
 
 function renderWizard() {
@@ -818,6 +958,49 @@ function renderVariantSummary(selectedVariants) {
   if (!selectedVariants || !Array.isArray(selectedVariants) || selectedVariants.length === 0) return '';
   const names = selectedVariants.map(v => v.name).filter(Boolean);
   return names.length ? ` <span class="small">(${escapeHtml(names.join(', '))})</span>` : '';
+}
+
+// ============================================================
+// KITCHEN VIEW — full-screen queue for a mounted tablet, nothing else
+// ============================================================
+function renderKitchen() {
+  topbarRight.innerHTML = `<span class="userline">Kitchen · ${escapeHtml(state.tenant ? state.tenant.name : '')}</span><button class="btn" onclick="handleLogout()">Sign out</button>`;
+
+  const active = state.orders.filter(o => o.status !== 'served' && o.status !== 'cancelled');
+  const pending = active.filter(o => o.status === 'pending');
+  const preparing = active.filter(o => o.status === 'preparing');
+  const ready = active.filter(o => o.status === 'ready');
+
+  root.innerHTML = `
+    <div style="padding:20px">
+      ${!audioUnlocked ? `
+        <div class="msg" style="background:rgba(192,138,46,0.15);color:var(--gold);border:1px solid var(--gold);font-size:15px;padding:14px 18px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">
+          <span>🔔 Tap to enable sound alerts for new orders — required once per session, browsers block sound otherwise.</span>
+          <button class="btn btn-solid" onclick="unlockAudioAlerts()">Enable sound</button>
+        </div>
+      ` : ''}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <h1 style="font-size:28px">Live Orders</h1>
+        ${audioUnlocked ? '<button class="btn" onclick="playAlertSound()" title="Test alert sound">🔊 Test sound</button>' : ''}
+      </div>
+      ${active.length === 0 ? '<div class="empty" style="font-size:18px;padding:80px 20px">No active orders. New orders will appear here with a sound alert.</div>' : `
+        <div class="grid2" style="grid-template-columns:1fr 1fr 1fr;gap:16px">
+          ${renderKitchenColumn('Pending', pending, '#C08A2E')}
+          ${renderKitchenColumn('Preparing', preparing, '#3D6B4A')}
+          ${renderKitchenColumn('Ready', ready, '#2D6E8C')}
+        </div>
+      `}
+    </div>
+  `;
+}
+
+function renderKitchenColumn(title, orders, color) {
+  return `
+    <div>
+      <h2 style="border-color:${color};color:${color}">${escapeHtml(title)} (${orders.length})</h2>
+      ${orders.length === 0 ? '<div class="small" style="padding:12px 0">None</div>' : orders.map(o => renderOrderCard(o)).join('')}
+    </div>
+  `;
 }
 
 function renderMenuTab() {
@@ -1040,6 +1223,15 @@ function renderSettingsTab() {
       </div>
     </div>
     <div class="ticket">
+      <h2>Kitchen staff</h2>
+      <p class="lead">Share this code with kitchen staff — they sign up (or sign in) on the login screen and enter it under "I have a kitchen invite code." They'll get a live order queue with sound alerts, nothing else.</p>
+      <div class="row" style="align-items:center">
+        <div style="flex:0 0 auto"><span style="font-family:var(--mono);font-size:22px;letter-spacing:0.1em;padding:8px 16px;background:#fff;border:1px solid var(--line);border-radius:6px">${escapeHtml(t.invite_code || '—')}</span></div>
+        <div style="flex:0 0 auto"><button class="btn btn-sm" onclick="regenerateInviteCode()">Regenerate code</button></div>
+      </div>
+      <p class="small" style="margin-top:8px">Regenerating invalidates the old code immediately — anyone who already joined stays joined.</p>
+    </div>
+    <div class="ticket">
       <h2>Payouts</h2>
       <p class="lead">${payoutStatus === 'verified' ? 'Your Stripe Connect account is verified — payouts are active.' : 'Connect your bank account via Stripe to start receiving payouts.'}</p>
       <button class="btn btn-solid" onclick="startStripeOnboarding()" ${payoutStatus === 'verified' ? 'disabled' : ''}>
@@ -1047,6 +1239,14 @@ function renderSettingsTab() {
       </button>
     </div>
   `;
+}
+
+async function regenerateInviteCode() {
+  if (!confirm('Regenerate the kitchen invite code? The old code will stop working immediately.')) return;
+  const { data, error } = await sb.rpc('regenerate_invite_code', { p_tenant_id: state.tenant.id });
+  if (error) return showMsg('settings-msg', error.message, 'error');
+  state.tenant.invite_code = data;
+  render();
 }
 
 async function startStripeOnboarding() {
