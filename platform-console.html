@@ -168,7 +168,7 @@ function renderDashboard() {
   topbarRight.innerHTML = `<span class="userline">${escapeHtml(state.user.email)}</span> <button class="btn" onclick="doLogout()" style="margin-left:12px">Sign out</button>`;
   root.innerHTML = `
     <div class="tabs">
-      ${['overview','businesses','support','reports','insights','team','billing'].map(t => {
+      ${['overview','businesses','support','reports','insights','team','billing','users'].map(t => {
         const unread = t === 'support' ? state.tickets.filter(tk => !tk.admin_read_at || (tk.updated_at && new Date(tk.updated_at) > new Date(tk.admin_read_at))).length : 0;
         return `<div class="tab ${state.tab===t?'active':''}" onclick="switchTab('${t}')">${t}${unread > 0 ? ` <span class="pill error" style="margin-left:4px">${unread}</span>` : ''}</div>`;
       }).join('')}
@@ -182,6 +182,7 @@ function renderDashboard() {
   if (state.tab === 'insights') renderInsightsTab();
   if (state.tab === 'team') { renderTeamTab(); loadPlatformAdmins(); }
   if (state.tab === 'billing') { renderAdminBillingTab(); loadAdminBilling(); }
+  if (state.tab === 'users') { renderAdminUsersTab(); loadAdminUsers(); }
 }
 async function switchTab(t) {
   state.tab = t; state.detailTenant = null;
@@ -652,6 +653,66 @@ async function removeAdmin(userId, email) {
 }
 
 // ============================================================
+// USERS — platform-wide directory: every account, who owns/staffs what,
+// and a way to trigger a password reset on someone's behalf.
+// ============================================================
+let adminUsersData = [];
+let adminUsersSearch = '';
+
+async function loadAdminUsers() {
+  const { data } = await sb.rpc('get_admin_users');
+  adminUsersData = data || [];
+  renderAdminUsersTab();
+}
+
+function renderAdminUsersTab() {
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+
+  const filtered = adminUsersData.filter(u => !adminUsersSearch || u.email.toLowerCase().includes(adminUsersSearch.toLowerCase()));
+
+  body.innerHTML = `
+    <div class="ticket">
+      <h2>All users (${adminUsersData.length})</h2>
+      <input id="user-search" placeholder="Search by email…" value="${escapeHtml(adminUsersSearch)}" oninput="filterAdminUsers(this.value)" style="margin-bottom:16px"/>
+      ${filtered.length === 0 ? '<div class="empty">No users found.</div>' : `
+        <table>
+          <thead><tr><th>Email</th><th>Role(s)</th><th>Status</th><th>Last sign-in</th><th>Joined</th><th></th></tr></thead>
+          <tbody>
+            ${filtered.map(u => `
+              <tr>
+                <td><strong>${escapeHtml(u.email)}</strong></td>
+                <td>
+                  ${(u.owns || []).map(o => `<span class="pill ok" style="margin-right:4px">Owner: ${escapeHtml(o.tenant_name)}</span>`).join('')}
+                  ${(u.staff_of || []).map(s => `<span class="pill warn" style="margin-right:4px">${escapeHtml(s.role)}: ${escapeHtml(s.tenant_name)}</span>`).join('')}
+                  ${!u.owns && !u.staff_of ? '<span class="small">No café affiliation</span>' : ''}
+                </td>
+                <td><span class="pill ${u.confirmed ? 'ok' : 'warn'}">${u.confirmed ? 'confirmed' : 'pending'}</span></td>
+                <td style="font-family:var(--mono);font-size:11px">${u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleDateString() : 'Never'}</td>
+                <td style="font-family:var(--mono);font-size:11px">${new Date(u.created_at).toLocaleDateString()}</td>
+                <td><button class="btn btn-sm" onclick="triggerPasswordReset('${escapeHtml(u.email)}')">Reset password</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>
+  `;
+}
+
+function filterAdminUsers(value) {
+  adminUsersSearch = value;
+  renderAdminUsersTab();
+}
+
+async function triggerPasswordReset(email) {
+  if (!confirm(`Send a password reset email to ${email}?`)) return;
+  const { error } = await sb.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin + '/console.html'
+  });
+  if (error) { alert('Could not send reset email: ' + error.message); return; }
+  alert(`Password reset email sent to ${email}.`);
+}
 // PLATFORM BILLING — who's on which plan, who owes what, follow-up
 // ============================================================
 let adminBillingData = [];
