@@ -312,9 +312,19 @@ async function verifyOtp() {
   const code = document.getElementById('otp-input').value.trim();
   const { error } = await sb.auth.verifyOtp({ phone: state.phone, token: code, type: 'sms' });
   if (error) return showInlineMsg(error.message);
+  state.otpStage = 'enter-name';
+  render();
+}
+async function saveNameAndFinish() {
+  const name = document.getElementById('name-input').value.trim();
+  if (name) await sb.rpc('update_my_customer_name', { p_name: name });
   state.otpStage = null;
   await refreshLoyalty();
   render();
+}
+function skipNameStep() {
+  state.otpStage = null;
+  refreshLoyalty().then(render);
 }
 function showInlineMsg(text) {
   state.msg = text;
@@ -668,7 +678,7 @@ function renderOtpSheet() {
         <button class="btn" style="margin-top:16px" onclick="sendOtp()">Send code</button>
       </div>
     `;
-  } else {
+  } else if (state.otpStage === 'enter-code') {
     overlay.innerHTML = `
       <div class="sheet" style="position:relative">
         <button class="btn-close" onclick="closeSignIn()">✕</button>
@@ -679,9 +689,20 @@ function renderOtpSheet() {
         <button class="btn" style="margin-top:16px" onclick="verifyOtp()">Verify</button>
       </div>
     `;
+  } else if (state.otpStage === 'enter-name') {
+    overlay.innerHTML = `
+      <div class="sheet" style="position:relative">
+        <button class="btn-close" onclick="skipNameStep()">✕</button>
+        <div class="sheet-title">What should we call you?</div>
+        <div class="sheet-desc">Optional — helps the café recognize you. Skip if you'd rather not.</div>
+        <input id="name-input" placeholder="Your name" />
+        <button class="btn" style="margin-top:16px" onclick="saveNameAndFinish()">Save</button>
+        <button class="btn btn-ghost" style="margin-top:8px" onclick="skipNameStep()">Skip</button>
+      </div>
+    `;
   }
   document.body.appendChild(overlay);
-  if (state.msg) {
+  if (state.msg && document.getElementById('otp-msg')) {
     document.getElementById('otp-msg').innerHTML = `<div class="msg error">${escapeHtml(state.msg)}</div>`;
     state.msg = null;
   }
