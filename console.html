@@ -196,6 +196,8 @@ async function boot() {
   const { data: { session } } = await sb.auth.getSession();
   if (session) {
     state.user = session.user;
+    const isPendingInvite = await checkForPendingInvite();
+    if (isPendingInvite) return;
     await loadTenant();
   } else {
     state.view = 'login';
@@ -773,6 +775,7 @@ async function cancelOrder(orderId) {
 // ============================================================
 function render() {
   if (state.view === 'login') return renderLogin();
+  if (state.view === 'set-invite-password') return renderSetInvitePassword();
   if (state.view === 'plan-selection') return renderPlanSelection();
   if (state.view === 'wizard') return renderWizard();
   if (state.view === 'home') return renderHome();
@@ -797,7 +800,6 @@ function renderLogin() {
         <div class="tabs" style="margin-bottom:22px">
           <div class="tab ${loginTab==='signin'?'active':''}" onclick="switchLoginTab('signin')">Sign in</div>
           <div class="tab ${loginTab==='register'?'active':''}" onclick="switchLoginTab('register')">Register your café</div>
-          <div class="tab ${loginTab==='kitchen'?'active':''}" onclick="switchLoginTab('kitchen')">Kitchen staff</div>
         </div>
         <div id="login-msg" class="msg hidden"></div>
         <div id="login-tab-body"></div>
@@ -812,7 +814,7 @@ function renderLoginTabBody() {
   if (loginTab === 'signin') {
     body.innerHTML = `
       <h1>Sign in</h1>
-      <p class="lead">For café owners who already have an account.</p>
+      <p class="lead">For café owners and invited kitchen staff.</p>
       <label for="si-email">Email</label>
       <input id="si-email" type="email" placeholder="owner@yourcafe.com" required />
       <label for="si-password">Password</label>
@@ -836,18 +838,6 @@ function renderLoginTabBody() {
         <label for="reg-terms" style="margin:0;display:inline">I agree to the <a href="terms.html" target="_blank" style="color:var(--gold)">Terms of Service</a> and <a href="privacy.html" target="_blank" style="color:var(--gold)">Privacy Policy</a></label>
       </div>
       <button class="btn btn-solid" style="width:100%;margin-top:18px" onclick="doRegisterBusiness()">Create my café account</button>
-    `;
-  } else if (loginTab === 'kitchen') {
-    body.innerHTML = `
-      <h1>Kitchen staff</h1>
-      <p class="lead">Ask your café owner for your invite code — it's in their Settings tab. You'll get a live order queue with sound alerts, nothing else.</p>
-      <label for="k-email">Email</label>
-      <input id="k-email" type="email" placeholder="you@example.com" required />
-      <label for="k-password">Password</label>
-      <input id="k-password" type="password" placeholder="••••••••" required minlength="6" />
-      <label for="k-code">Kitchen invite code</label>
-      <input id="k-code" placeholder="e.g. 2023D835" required />
-      <button class="btn btn-solid" style="width:100%;margin-top:18px" onclick="doKitchenJoin()">Join kitchen</button>
     `;
   }
 }
@@ -873,35 +863,64 @@ function doRegisterBusiness() {
   handleSignup(email, password, name);
 }
 
-function doKitchenJoin() {
-  const email = document.getElementById('k-email').value.trim();
-  const password = document.getElementById('k-password').value;
-  const code = document.getElementById('k-code').value.trim();
-  if (!email || !password) return showMsg('login-msg', 'Enter both email and password.', 'error');
-  if (!code) return showMsg('login-msg', 'Enter your kitchen invite code.', 'error');
-  handleKitchenLoginOrSignup(email, password, code);
+// ============================================================
+// KITCHEN INVITE ACCEPTANCE — an invited staff member clicks the emailed
+// link, Supabase auto-authenticates them with a temporary session, and we
+// prompt them to set a real password before completing their join.
+// ============================================================
+async function checkForPendingInvite() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return false;
+  // Supabase includes type=invite in the URL hash when this session came
+  // from an invite link (not a normal sign-in) — check both the raw hash
+  // (before Supabase's client strips it) and the user's own metadata as a
+  // fallback, since the hash may already be gone by the time this runs.
+  const cameFromInviteLink = window.location.hash.includes('type=invite');
+  const hasPendingInviteMetadata = !!(session.user.user_metadata && session.user.user_metadata.invited_tenant_id);
+  if (cameFromInviteLink || hasPendingInviteMetadata) {
+    state.user = session.user;
+    state.view = 'set-invite-password';
+    render();
+    return true;
+  }
+  return false;
 }
 
-// Kitchen staff: try sign-in first (existing account), fall back to sign-up,
-// then always redeem the invite code afterward either way.
-async function handleKitchenLoginOrSignup(email, password, code) {
-  let session = null;
-  const signInResult = await sb.auth.signInWithPassword({ email, password });
-  if (signInResult.data && signInResult.data.session) {
-    session = signInResult.data.session;
-  } else {
-    const signUpResult = await sb.auth.signUp({ email, password, options: { emailRedirectTo: `https://${PLATFORM_DOMAIN}/console.html` } });
-    if (signUpResult.error) return showMsg('login-msg', signUpResult.error.message, 'error');
-    if (!signUpResult.data.session) {
-      return showMsg('login-msg', 'Check your email to confirm your account, then join again with your invite code.', 'ok');
-    }
-    session = signUpResult.data.session;
+function renderSetInvitePassword() {
+  topbarRight.innerHTML = '';
+  const tenantName = state.user.user_metadata?.invited_tenant_name || 'the café';
+  root.innerHTML = `
+    <div class="center-screen">
+      <div class="ticket login-card">
+        <div class="eyebrow">You're invited</div>
+        <h1>Join ${escapeHtml(tenantName)}'s kitchen</h1>
+        <p class="lead">Set a password to finish creating your account. You'll get a live order queue with sound alerts — nothing else.</p>
+        <div id="invite-pw-msg" class="msg hidden"></div>
+        <label for="invite-password">New password</label>
+        <input id="invite-password" type="password" placeholder="••••••••" required minlength="6"/>
+        <label for="invite-password-confirm">Confirm password</label>
+        <input id="invite-password-confirm" type="password" placeholder="••••••••" required minlength="6"/>
+        <button class="btn btn-solid" style="width:100%;margin-top:18px" onclick="completeInviteSetup()">Set password &amp; join</button>
+      </div>
+    </div>
+  `;
+}
+
+async function completeInviteSetup() {
+  const password = document.getElementById('invite-password').value;
+  const confirm = document.getElementById('invite-password-confirm').value;
+  if (!password || password.length < 6) return showMsg('invite-pw-msg', 'Password must be at least 6 characters.', 'error');
+  if (password !== confirm) return showMsg('invite-pw-msg', 'Passwords don\'t match.', 'error');
+
+  const { error: pwError } = await sb.auth.updateUser({ password });
+  if (pwError) return showMsg('invite-pw-msg', pwError.message, 'error');
+
+  const { data: joinResult, error: joinError } = await sb.rpc('accept_kitchen_invite');
+  if (joinError || (joinResult && joinResult.error)) {
+    return showMsg('invite-pw-msg', 'Password set, but joining the café failed. Please contact your café owner.', 'error');
   }
-  state.user = session.user;
-  const { data: joinResult, error } = await sb.rpc('join_tenant_as_staff', { p_invite_code: code });
-  if (error || (joinResult && joinResult.error)) {
-    return showMsg('login-msg', 'That invite code doesn\'t look right. Ask your café owner to confirm it.', 'error');
-  }
+  // Clear the invite flag so future normal logins don't re-trigger this screen
+  await sb.auth.updateUser({ data: { invited_tenant_id: null } });
   await loadTenant();
 }
 
@@ -1040,7 +1059,7 @@ function renderHome() {
   if (state.homeTab === 'menu') body.innerHTML = renderMenuTab();
   if (state.homeTab === 'tables') body.innerHTML = renderTablesTab();
   if (state.homeTab === 'loyalty') body.innerHTML = renderLoyaltyTab();
-  if (state.homeTab === 'settings') body.innerHTML = renderSettingsTab();
+  if (state.homeTab === 'settings') { body.innerHTML = renderSettingsTab(); loadStaffList(); }
   if (state.homeTab === 'reports') renderReportsTab();
   if (state.homeTab === 'billing') { renderBillingTab(); loadBillingSummary(); }
   if (state.homeTab === 'support') { renderSupportTab(); markSupportRead(); }
@@ -1778,12 +1797,15 @@ function renderSettingsTab() {
     </div>
     <div class="ticket">
       <h2>Kitchen staff</h2>
-      <p class="lead">Share this code with kitchen staff — they sign up (or sign in) on the login screen and enter it under "I have a kitchen invite code." They'll get a live order queue with sound alerts, nothing else.</p>
+      <p class="lead">Invite by email — they'll get a real invitation, click the link, set their own password, and land straight in the kitchen queue. No code to share, no self-serve signup.</p>
+      <div id="invite-msg" class="msg hidden"></div>
       <div class="row" style="align-items:center">
-        <div style="flex:0 0 auto"><span style="font-family:var(--mono);font-size:22px;letter-spacing:0.1em;padding:8px 16px;background:#fff;border:1px solid var(--line);border-radius:6px">${escapeHtml(t.invite_code || '—')}</span></div>
-        <div style="flex:0 0 auto"><button class="btn btn-sm" onclick="regenerateInviteCode()">Regenerate code</button></div>
+        <div><input id="invite-email" type="email" placeholder="staff@example.com"/></div>
+        <div style="flex:0 0 auto"><button class="btn btn-sm btn-solid" onclick="sendKitchenInvite()">Send invite</button></div>
       </div>
-      <p class="small" style="margin-top:8px">Regenerating invalidates the old code immediately — anyone who already joined stays joined.</p>
+      <hr class="divider"/>
+      <h3>Current staff</h3>
+      <div id="staff-list"><div class="small">Loading…</div></div>
     </div>
     <div class="ticket">
       <h2>Payouts</h2>
@@ -1795,12 +1817,47 @@ function renderSettingsTab() {
   `;
 }
 
-async function regenerateInviteCode() {
-  if (!confirm('Regenerate the kitchen invite code? The old code will stop working immediately.')) return;
-  const { data, error } = await sb.rpc('regenerate_invite_code', { p_tenant_id: state.tenant.id });
-  if (error) return showMsg('settings-msg', error.message, 'error');
-  state.tenant.invite_code = data;
-  render();
+async function sendKitchenInvite() {
+  const email = document.getElementById('invite-email').value.trim();
+  if (!email) return showMsg('invite-msg', 'Enter an email address.', 'error');
+  const { data: { session } } = await sb.auth.getSession();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/invite-kitchen-staff`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tenant_id: state.tenant.id, email,
+      redirect_to: `https://${PLATFORM_DOMAIN}/console.html`
+    })
+  });
+  const data = await res.json();
+  if (data.error) return showMsg('invite-msg', data.error, 'error');
+  showMsg('invite-msg', `Invite sent to ${email}.`, 'ok');
+  document.getElementById('invite-email').value = '';
+  loadStaffList();
+}
+
+async function loadStaffList() {
+  const el = document.getElementById('staff-list');
+  if (!el) return;
+  const { data, error } = await sb.rpc('get_tenant_staff_list', { p_tenant_id: state.tenant.id });
+  if (error || !data) { el.innerHTML = '<div class="small">Could not load staff.</div>'; return; }
+  if (data.length === 0) { el.innerHTML = '<div class="empty">No staff invited yet.</div>'; return; }
+  el.innerHTML = data.map(s => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px dashed var(--line)">
+      <div>
+        <strong>${escapeHtml(s.email)}</strong>
+        <span class="pill ${s.confirmed ? 'ok' : 'warn'}" style="margin-left:6px">${s.confirmed ? s.role : 'invite pending'}</span>
+        <div class="small">Invited ${new Date(s.joined_at).toLocaleDateString()}</div>
+      </div>
+      <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" onclick="removeStaffMember('${s.user_id}','${escapeHtml(s.email)}')">Remove</button>
+    </div>
+  `).join('');
+}
+
+async function removeStaffMember(userId, email) {
+  if (!confirm(`Remove ${email}'s access to your café?`)) return;
+  await sb.rpc('remove_tenant_staff', { p_tenant_id: state.tenant.id, p_user_id: userId });
+  loadStaffList();
 }
 
 async function startStripeOnboarding() {
