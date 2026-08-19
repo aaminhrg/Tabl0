@@ -594,9 +594,10 @@ function renderMenu() {
   for (const [catIndex, cat] of (d.menu || []).entries()) {
     html += `<h2 id="cat-${catIndex}">${escapeHtml(cat.category_name)}</h2>`;
     for (const item of cat.items) {
+      const catIcon = categoryIcon(cat.category_name);
       const imgTag = item.photo_url
-        ? `<img class="item-img" src="${escapeAttr(item.photo_url)}" alt="" onerror="this.outerHTML='<div class=&quot;item-img-placeholder&quot;>☕</div>'"/>`
-        : `<div class="item-img-placeholder">☕</div>`;
+        ? `<img class="item-img" src="${escapeAttr(item.photo_url)}" alt="" onerror="this.outerHTML='<div class=&quot;item-img-placeholder&quot;>${catIcon}</div>'"/>`
+        : `<div class="item-img-placeholder">${catIcon}</div>`;
       html += `
         <div class="item ${item.sold_out ? 'sold-out' : ''}" onclick='${item.sold_out ? '' : `openItemPicker(${JSON.stringify(item).replace(/'/g, "&#39;")})`}'>
           ${imgTag}
@@ -793,6 +794,19 @@ function scrollToCategory(anchorId, chipEl) {
   document.getElementById(anchorId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   document.querySelectorAll('.category-chip').forEach(c => c.classList.remove('active'));
   chipEl.classList.add('active');
+}
+
+function categoryIcon(categoryName) {
+  const name = (categoryName || '').toLowerCase();
+  if (name.includes('hot')) return '☕';
+  if (name.includes('cold')) return '🥤';
+  if (name.includes('juice')) return '🧃';
+  if (name.includes('cake')) return '🎂';
+  if (name.includes('cookie')) return '🍪';
+  if (name.includes('dessert') || name.includes('sweet')) return '🍰';
+  if (name.includes('sandwich') || name.includes('food') || name.includes('savory')) return '🥪';
+  if (name.includes('drink') || name.includes('coffee') || name.includes('tea')) return '☕';
+  return '🍽️';
 }
 
 function money(n) { return Number(n || 0).toFixed(2); }
