@@ -413,7 +413,7 @@ function renderMenu() {
       html += `
         <div class="loyalty-banner">
           <div style="flex:1">
-            <div style="font-size:13px;margin-bottom:6px">${remaining === l.punch_threshold ? 'Reward ready! Order to redeem.' : `${remaining} more order${remaining===1?'':'s'} until: ${escapeHtml(l.reward_description||'a reward')}`}</div>
+            <div style="font-size:13px;margin-bottom:6px">${remaining === l.punch_threshold ? 'Reward ready! Order to redeem.' : `${remaining} more item${remaining===1?'':'s'} until: ${escapeHtml(l.reward_description||'a reward')}`}</div>
             <div class="loyalty-progress-track"><div class="loyalty-progress-fill" style="width:${pct}%"></div></div>
           </div>
           <div class="loyalty-text">${l.order_count % l.punch_threshold}/${l.punch_threshold}</div>
@@ -541,9 +541,14 @@ function renderCartSheet() {
     </div>
   `).join('');
 
+  // Predicts whether THIS order will cross a reward threshold, using the same
+  // crossing-a-multiple math the server actually uses — counts real item
+  // quantities in the cart, not a flat "1 per order" assumption.
+  const cartQualifyingUnits = state.cart.reduce((sum, l) => sum + l.quantity, 0);
   const willRedeem = state.loyalty && state.loyalty.signed_in && state.loyalty.loyalty_enabled
-    && state.loyalty.type === 'punch'
-    && ((state.loyalty.order_count % state.loyalty.punch_threshold) === state.loyalty.punch_threshold - 1 || state.loyalty.order_count === 0 && state.loyalty.punch_threshold === 1);
+    && state.loyalty.type === 'punch' && state.loyalty.punch_threshold > 0
+    && Math.floor((state.loyalty.order_count + cartQualifyingUnits) / state.loyalty.punch_threshold)
+       > Math.floor(state.loyalty.order_count / state.loyalty.punch_threshold);
 
   overlay.innerHTML = `
     <div class="sheet" style="position:relative">
