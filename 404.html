@@ -422,12 +422,15 @@ async function placeOrder() {
   state.showCartSheet = false;
   if (state.loyalty && state.loyalty.signed_in) await refreshLoyalty();
 
-  // If this café has a real payment gateway connected, send the customer to
-  // pay online. If anything fails here, fall back to pay-at-counter rather
-  // than blocking the order — the order itself already succeeded.
-  if (state.data.tenant.payment_gateway_status === 'configured') {
+  // If this café has a real payment gateway connected, initiate payment.
+  // Redirect-based providers (Paymob/Kashier/PayTabs) send the customer to
+  // a hosted checkout page. Fawry is different — it returns a reference
+  // number for cash payment at a physical location, shown on-screen instead.
+  const gatewayStatus = state.data.tenant.payment_gateway_status;
+  const gatewayProvider = state.data.tenant.payment_gateway_provider;
+  if (gatewayStatus === 'configured' && gatewayProvider) {
     try {
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/paymob-create-payment`, {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/${gatewayProvider}-create-payment`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ order_id: data.order_id })
       });
@@ -435,6 +438,9 @@ async function placeOrder() {
       if (paymentData.checkout_url) {
         window.location.href = paymentData.checkout_url;
         return;
+      }
+      if (paymentData.reference_number) {
+        state.lastOrder.fawryReference = paymentData.reference_number;
       }
     } catch (e) { /* fall through to pay-at-counter confirmation below */ }
   }
@@ -476,6 +482,13 @@ function renderConfirmation() {
           ${o.reward_applied ? `<div class="cart-total-row reward-row"><span>Reward applied</span><span>-${money(o.reward_discount)} EGP</span></div>` : ''}
           <div class="cart-total-row grand"><span>Total</span><span>${money(o.total)} EGP</span></div>
         </div>
+        ${o.fawryReference ? `
+          <div class="msg" style="background:rgba(192,138,46,0.12);color:var(--gold);border:1px solid var(--gold);text-align:center;padding:16px;margin-bottom:16px">
+            <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Pay with cash at any Fawry location</div>
+            <div style="font-size:24px;font-weight:bold;letter-spacing:0.05em">${escapeHtml(o.fawryReference)}</div>
+            <div style="font-size:12px;margin-top:6px">Show this reference number at any Fawry point nationwide</div>
+          </div>
+        ` : ''}
         ${o.estimated_prep_time ? `<p style="color:var(--ink-soft);font-size:13px">Estimated prep time: ~${o.estimated_prep_time} min</p>` : ''}
         <button class="btn btn-solid" onclick="startOrderTracking('${o.order_id}')" style="margin-bottom:10px">Track my order</button>
         <button class="btn btn-ghost" onclick="startNewOrder()">Order something else</button>
