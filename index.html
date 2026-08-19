@@ -109,6 +109,17 @@
   .cta-final { text-align: center; padding: 90px 28px; background: var(--crema); border-top: 1px dashed var(--line); }
   .cta-final h2 { font-size: 30px; margin-bottom: 14px; }
   .cta-final p { color: var(--ink-soft); margin-bottom: 30px; }
+  .pricing-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 720px; margin: 0 auto 36px; text-align: left; }
+  @media (max-width: 720px) { .pricing-grid { grid-template-columns: 1fr; } }
+  .price-card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 28px 26px; }
+  .price-card.featured { border-color: var(--gold); border-width: 2px; position: relative; }
+  .price-card.featured::before { content: "Best for steady volume"; position: absolute; top: -13px; left: 24px; background: var(--gold); color: var(--espresso); font-family: var(--mono); font-size: 11px; padding: 3px 10px; border-radius: 10px; font-weight: bold; }
+  .price-card h3 { font-size: 18px; margin-bottom: 10px; }
+  .price-amount { font-size: 32px; font-weight: bold; color: var(--espresso); margin-bottom: 4px; }
+  .price-amount span { font-size: 14px; font-weight: normal; color: var(--ink-soft); }
+  .price-card ul { list-style: none; margin: 16px 0 0; padding: 0; font-size: 14px; color: var(--ink-soft); }
+  .price-card li { padding: 6px 0; border-bottom: 1px dashed var(--line); }
+  .price-card li:last-child { border-bottom: none; }
 
   footer {
     background: var(--espresso-2); color: var(--line); padding: 40px 28px; text-align: center;
@@ -229,8 +240,33 @@
 </div>
 
 <div class="cta-final" id="pricing">
-  <h2>Start free. Pay only when you're live.</h2>
-  <p>No setup fee, no monthly minimum — a small percentage per order once you're actually taking them.</p>
+  <div class="section-eyebrow">Pricing</div>
+  <h2>Choose what fits your café</h2>
+  <p>Building your menu, tables, and dashboard is always free — this only applies once you're taking real orders. Switch plans anytime.</p>
+
+  <div class="pricing-grid">
+    <div class="price-card">
+      <h3>Pay-as-you-go</h3>
+      <div class="price-amount">0.8%<span> per order</span></div>
+      <p style="font-size:14px;color:var(--ink-soft)">No monthly fee. Best if you're just getting started.</p>
+      <ul>
+        <li>No setup fee, no monthly minimum</li>
+        <li>Full menu, tables, loyalty — all included</li>
+        <li>Kitchen staff logins included</li>
+      </ul>
+    </div>
+    <div class="price-card featured">
+      <h3>Pro</h3>
+      <div class="price-amount">800 EGP<span>/month</span></div>
+      <p style="font-size:14px;color:var(--ink-soft)">0% per order — keep 100% of every sale.</p>
+      <ul>
+        <li>Everything in Pay-as-you-go</li>
+        <li>No per-order fee, ever</li>
+        <li>Best once you're doing steady daily volume</li>
+      </ul>
+    </div>
+  </div>
+
   <a href="console.html" class="btn btn-solid" style="padding:15px 32px;font-size:14px">Set up your café now</a>
 </div>
 
