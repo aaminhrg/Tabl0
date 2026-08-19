@@ -1060,7 +1060,7 @@ function renderHome() {
   if (state.homeTab === 'menu') body.innerHTML = renderMenuTab();
   if (state.homeTab === 'tables') body.innerHTML = renderTablesTab();
   if (state.homeTab === 'loyalty') body.innerHTML = renderLoyaltyTab();
-  if (state.homeTab === 'settings') { body.innerHTML = renderSettingsTab(); loadStaffList(); }
+  if (state.homeTab === 'settings') { body.innerHTML = renderSettingsTab(); loadStaffList(); loadPaymentGatewayStatus(); }
   if (state.homeTab === 'reports') renderReportsTab();
   if (state.homeTab === 'billing') { renderBillingTab(); loadBillingSummary(); }
   if (state.homeTab === 'support') { renderSupportTab(); markSupportRead(); }
@@ -1847,12 +1847,9 @@ function renderSettingsTab() {
       <h3>Current staff</h3>
       <div id="staff-list"><div class="small">Loading…</div></div>
     </div>
-    <div class="ticket">
-      <h2>Payouts</h2>
-      <p class="lead">${payoutStatus === 'verified' ? 'Your Stripe Connect account is verified — payouts are active.' : 'Connect your bank account via Stripe to start receiving payouts.'}</p>
-      <button class="btn btn-solid" onclick="startStripeOnboarding()" ${payoutStatus === 'verified' ? 'disabled' : ''}>
-        ${payoutStatus === 'verified' ? 'Connected' : 'Connect bank account'}
-      </button>
+    <div class="ticket" id="payment-gateway-section">
+      <h2>Payment Gateway</h2>
+      <div class="small">Loading…</div>
     </div>
   `;
 }
@@ -1892,6 +1889,148 @@ async function loadStaffList() {
       <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" onclick="removeStaffMember('${s.user_id}','${escapeHtml(s.email)}')">Remove</button>
     </div>
   `).join('');
+}
+
+// ============================================================
+// PAYMENT GATEWAY — each café picks its own provider. Stripe doesn't
+// officially support Egyptian merchants, so the real local options
+// (Paymob, Kashier, PayTabs, Fawry) use direct credential entry instead
+// of an OAuth-style connect flow.
+// ============================================================
+const PAYMENT_PROVIDERS = {
+  paymob: {
+    label: 'Paymob', flow: 'credentials',
+    blurb: 'Most developer-friendly Egyptian gateway — cards, mobile wallets, Apple/Google Pay, installments.',
+    fields: [
+      { key: 'api_key', label: 'API Key', placeholder: 'From Paymob Dashboard → Settings' },
+      { key: 'hmac_secret', label: 'HMAC Secret', placeholder: 'From Paymob Dashboard → Settings' },
+      { key: 'integration_id', label: 'Card Integration ID', placeholder: 'From Developers → Payment Integrations' },
+      { key: 'public_key', label: 'Public Key', placeholder: 'From Paymob Dashboard → Settings' }
+    ]
+  },
+  kashier: {
+    label: 'Kashier', flow: 'credentials',
+    blurb: 'Modern Egyptian gateway with a clean checkout experience.',
+    fields: [
+      { key: 'merchant_id', label: 'Merchant ID', placeholder: 'From Kashier Dashboard' },
+      { key: 'api_key', label: 'API Key', placeholder: 'From Kashier Dashboard → API Keys' },
+      { key: 'secret_key', label: 'Secret Key', placeholder: 'From Kashier Dashboard → API Keys' }
+    ]
+  },
+  paytabs: {
+    label: 'PayTabs', flow: 'credentials',
+    blurb: 'MENA-wide gateway — useful if you operate across Egypt and the Gulf.',
+    fields: [
+      { key: 'profile_id', label: 'Profile ID', placeholder: 'From PayTabs Dashboard' },
+      { key: 'server_key', label: 'Server Key', placeholder: 'From PayTabs Dashboard → Developers' },
+      { key: 'client_key', label: 'Client Key', placeholder: 'From PayTabs Dashboard → Developers' }
+    ]
+  },
+  fawry: {
+    label: 'Fawry', flow: 'credentials',
+    blurb: "Egypt's largest payment network — 300,000+ physical payment points nationwide.",
+    fields: [
+      { key: 'merchant_code', label: 'Merchant Code', placeholder: 'From FawryPay Merchant Portal' },
+      { key: 'security_key', label: 'Security Key', placeholder: 'From FawryPay Merchant Portal' }
+    ]
+  },
+  stripe: {
+    label: 'Stripe', flow: 'oauth',
+    blurb: 'Requires a company registered outside Egypt (Stripe does not support Egyptian merchants directly).'
+  }
+};
+
+let paymentGatewayState = { status: null, selectedProvider: null };
+
+async function loadPaymentGatewayStatus() {
+  const { data } = await sb.rpc('get_payment_gateway_status', { p_tenant_id: state.tenant.id });
+  paymentGatewayState.status = data;
+  renderPaymentGatewaySection();
+}
+
+function renderPaymentGatewaySection() {
+  const el = document.getElementById('payment-gateway-section');
+  if (!el) return;
+  const st = paymentGatewayState.status;
+
+  if (st && st.status === 'configured') {
+    const p = PAYMENT_PROVIDERS[st.provider];
+    el.innerHTML = `
+      <h2>Payment Gateway</h2>
+      <div class="msg ok" style="display:flex;justify-content:space-between;align-items:center">
+        <span>✓ Connected to <strong>${p ? p.label : st.provider}</strong></span>
+        <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" onclick="disconnectGateway()">Disconnect</button>
+      </div>
+      <p class="small" style="margin-top:8px">Configured ${st.configured_at ? new Date(st.configured_at).toLocaleDateString() : ''}. Credentials are stored securely and never shown again — disconnect and reconnect to change them.</p>
+    `;
+    return;
+  }
+
+  el.innerHTML = `
+    <h2>Payment Gateway</h2>
+    <p class="lead">Choose the provider your café already uses (or wants to use) to accept customer payments.</p>
+    <div id="provider-cards" class="grid2" style="grid-template-columns:1fr 1fr;gap:10px"></div>
+    <div id="provider-form-area" style="margin-top:16px"></div>
+  `;
+  renderProviderCards();
+}
+
+function renderProviderCards() {
+  const el = document.getElementById('provider-cards');
+  if (!el) return;
+  el.innerHTML = Object.entries(PAYMENT_PROVIDERS).map(([key, p]) => `
+    <div class="category-block" style="cursor:pointer;padding:14px;${paymentGatewayState.selectedProvider===key?'border-color:var(--gold)':''}" onclick="selectPaymentProvider('${key}')">
+      <h3 style="font-size:15px;margin-bottom:4px">${p.label}</h3>
+      <p class="small">${p.blurb}</p>
+    </div>
+  `).join('');
+}
+
+function selectPaymentProvider(key) {
+  paymentGatewayState.selectedProvider = key;
+  renderProviderCards();
+  const p = PAYMENT_PROVIDERS[key];
+  const formArea = document.getElementById('provider-form-area');
+
+  if (p.flow === 'oauth') {
+    formArea.innerHTML = `
+      <div class="ticket" style="padding:16px;background:#fff">
+        <p class="small" style="margin-bottom:10px">${p.blurb}</p>
+        <button class="btn btn-solid" onclick="startStripeOnboarding()">Connect with Stripe</button>
+      </div>
+    `;
+    return;
+  }
+
+  formArea.innerHTML = `
+    <div class="ticket" style="padding:16px;background:#fff">
+      <div id="gateway-msg" class="msg hidden"></div>
+      ${p.fields.map(f => `<label>${f.label}</label><input id="gw-field-${f.key}" placeholder="${f.placeholder}"/>`).join('')}
+      <button class="btn btn-solid" style="margin-top:14px" onclick="savePaymentCredentials('${paymentGatewayState.selectedProvider}')">Connect ${p.label}</button>
+    </div>
+  `;
+}
+
+async function savePaymentCredentials(providerKey) {
+  const p = PAYMENT_PROVIDERS[providerKey];
+  const credentials = {};
+  for (const f of p.fields) {
+    const val = document.getElementById(`gw-field-${f.key}`).value.trim();
+    if (!val) return showMsg('gateway-msg', `${f.label} is required.`, 'error');
+    credentials[f.key] = val;
+  }
+  const { data, error } = await sb.rpc('save_payment_gateway_credentials', {
+    p_tenant_id: state.tenant.id, p_provider: providerKey, p_credentials: credentials
+  });
+  if (error || (data && data.error)) return showMsg('gateway-msg', 'Could not save credentials.', 'error');
+  await loadPaymentGatewayStatus();
+}
+
+async function disconnectGateway() {
+  if (!confirm('Disconnect your payment gateway? Customers won\'t be able to pay online until you reconnect one.')) return;
+  await sb.rpc('disconnect_payment_gateway', { p_tenant_id: state.tenant.id });
+  paymentGatewayState.selectedProvider = null;
+  await loadPaymentGatewayStatus();
 }
 
 async function removeStaffMember(userId, email) {
