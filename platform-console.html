@@ -168,7 +168,7 @@ function renderDashboard() {
   topbarRight.innerHTML = `<span class="userline">${escapeHtml(state.user.email)}</span> <button class="btn" onclick="doLogout()" style="margin-left:12px">Sign out</button>`;
   root.innerHTML = `
     <div class="tabs">
-      ${['overview','businesses','support','reports','insights','team','billing','users'].map(t => {
+      ${['overview','businesses','support','reports','insights','team','billing','users','customers'].map(t => {
         const unread = t === 'support' ? state.tickets.filter(tk => !tk.admin_read_at || (tk.updated_at && new Date(tk.updated_at) > new Date(tk.admin_read_at))).length : 0;
         return `<div class="tab ${state.tab===t?'active':''}" onclick="switchTab('${t}')">${t}${unread > 0 ? ` <span class="pill error" style="margin-left:4px">${unread}</span>` : ''}</div>`;
       }).join('')}
@@ -183,6 +183,7 @@ function renderDashboard() {
   if (state.tab === 'team') { renderTeamTab(); loadPlatformAdmins(); }
   if (state.tab === 'billing') { renderAdminBillingTab(); loadAdminBilling(); }
   if (state.tab === 'users') { renderAdminUsersTab(); loadAdminUsers(); }
+  if (state.tab === 'customers') { renderAdminCustomersTab(); loadAdminCustomers(); }
 }
 async function switchTab(t) {
   state.tab = t; state.detailTenant = null;
@@ -690,7 +691,10 @@ function renderAdminUsersTab() {
                 <td><span class="pill ${u.confirmed ? 'ok' : 'warn'}">${u.confirmed ? 'confirmed' : 'pending'}</span></td>
                 <td style="font-family:var(--mono);font-size:11px">${u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleDateString() : 'Never'}</td>
                 <td style="font-family:var(--mono);font-size:11px">${new Date(u.created_at).toLocaleDateString()}</td>
-                <td><button class="btn btn-sm" onclick="triggerPasswordReset('${escapeHtml(u.email)}')">Reset password</button></td>
+                <td>
+                  <button class="btn btn-sm" onclick="triggerPasswordReset('${escapeHtml(u.email)}')">Reset password</button>
+                  <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" onclick="deleteUserAccount('${u.user_id}','${escapeHtml(u.email)}')">Delete account</button>
+                </td>
               </tr>
             `).join('')}
           </tbody>
@@ -712,6 +716,95 @@ async function triggerPasswordReset(email) {
   });
   if (error) { alert('Could not send reset email: ' + error.message); return; }
   alert(`Password reset email sent to ${email}.`);
+}
+
+async function deleteUserAccount(userId, email) {
+  const typed = prompt(`This permanently deletes ${email}'s entire Tabl0 account — not just café access, the whole account. This cannot be undone.\n\nType the email exactly to confirm:`);
+  if (typed !== email) {
+    if (typed !== null) alert('Email didn\'t match — nothing was deleted.');
+    return;
+  }
+  const { data: { session } } = await sb.auth.getSession();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-delete-user`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target_user_id: userId })
+  });
+  const data = await res.json();
+  if (data.error) { alert('Could not delete account: ' + data.error); return; }
+  alert(`${email}'s account has been deleted.`);
+  await loadAdminUsers();
+}
+
+// ============================================================
+// CUSTOMERS — platform-wide, phone-verified loyalty customers.
+// Deliberately separate from Users (café owners/staff). These are two
+// different account types that happen to share the same auth system —
+// a customer never has business/admin access, and a business account
+// (owner/staff) is never listed here even if they've also ordered as a
+// customer somewhere.
+// ============================================================
+let adminCustomersData = [];
+let adminCustomersSearch = '';
+
+async function loadAdminCustomers() {
+  const { data } = await sb.rpc('get_admin_customers');
+  adminCustomersData = data || [];
+  renderAdminCustomersTab();
+}
+
+function renderAdminCustomersTab() {
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+
+  const filtered = adminCustomersData.filter(c =>
+    !adminCustomersSearch ||
+    c.phone_number.includes(adminCustomersSearch) ||
+    (c.display_name && c.display_name.toLowerCase().includes(adminCustomersSearch.toLowerCase()))
+  );
+
+  const totalOrders = adminCustomersData.reduce((s, c) => s + c.total_orders, 0);
+  const totalSpent = adminCustomersData.reduce((s, c) => s + Number(c.total_spent), 0);
+  const multiCafe = adminCustomersData.filter(c => c.cafes_ordered_from && c.cafes_ordered_from.length > 1).length;
+
+  body.innerHTML = `
+    <div class="ticket">
+      <h2>Customers</h2>
+      <p class="lead">Phone-verified loyalty customers, platform-wide — separate from café owners/staff (see Users tab). This shows their activity across every café, which a single café's own dashboard never sees.</p>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-num">${adminCustomersData.length}</div><div class="stat-label">Total customers</div></div>
+        <div class="stat-card"><div class="stat-num">${totalOrders}</div><div class="stat-label">Orders, all-time</div></div>
+        <div class="stat-card"><div class="stat-num">${money(totalSpent)}</div><div class="stat-label">Spent, all-time (EGP)</div></div>
+        <div class="stat-card"><div class="stat-num">${multiCafe}</div><div class="stat-label">Order from 2+ cafés</div></div>
+      </div>
+    </div>
+    <div class="ticket">
+      <h2>All customers (${adminCustomersData.length})</h2>
+      <input id="customer-search" placeholder="Search by name or phone…" value="${escapeHtml(adminCustomersSearch)}" oninput="filterAdminCustomers(this.value)" style="margin-bottom:16px"/>
+      ${filtered.length === 0 ? '<div class="empty">No customers found.</div>' : `
+        <table>
+          <thead><tr><th>Customer</th><th>Cafés ordered from</th><th>Orders</th><th>Spent</th><th>Last order</th><th>Joined</th></tr></thead>
+          <tbody>
+            ${filtered.map(c => `
+              <tr>
+                <td><strong>${escapeHtml(c.display_name || 'No name given')}</strong><br><span class="small">${escapeHtml(c.phone_number)}</span></td>
+                <td>${(c.cafes_ordered_from || []).map(name => `<span class="pill warn" style="margin-right:4px">${escapeHtml(name)}</span>`).join('') || '<span class="small">None yet</span>'}</td>
+                <td>${c.total_orders}</td>
+                <td>${money(c.total_spent)} EGP</td>
+                <td style="font-family:var(--mono);font-size:11px">${c.last_order_at ? new Date(c.last_order_at).toLocaleDateString() : '—'}</td>
+                <td style="font-family:var(--mono);font-size:11px">${new Date(c.created_at).toLocaleDateString()}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>
+  `;
+}
+
+function filterAdminCustomers(value) {
+  adminCustomersSearch = value;
+  renderAdminCustomersTab();
 }
 // PLATFORM BILLING — who's on which plan, who owes what, follow-up
 // ============================================================
