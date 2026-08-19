@@ -363,6 +363,7 @@ function render() {
 
   if (state.view === 'error') return renderError();
   if (state.view === 'confirmation') return renderConfirmation();
+  if (state.view === 'tracking') return renderTracking();
   if (state.view === 'loading') { root.innerHTML = '<div class="center-screen">Loading menu…</div>'; return; }
   renderMenu();
 }
@@ -384,12 +385,91 @@ function renderConfirmation() {
           <div class="cart-total-row grand"><span>Total</span><span>${money(o.total)} EGP</span></div>
         </div>
         ${o.estimated_prep_time ? `<p style="color:var(--ink-soft);font-size:13px">Estimated prep time: ~${o.estimated_prep_time} min</p>` : ''}
-        <button class="btn" onclick="startNewOrder()">Order something else</button>
+        <button class="btn btn-solid" onclick="startOrderTracking('${o.order_id}')" style="margin-bottom:10px">Track my order</button>
+        <button class="btn btn-ghost" onclick="startNewOrder()">Order something else</button>
       </div>
     </div>
   `;
 }
 function startNewOrder() { state.view = 'menu'; render(); }
+
+// ---------- Order status tracking (polls every 5s, matching native app behavior) ----------
+let trackingInterval = null;
+function startOrderTracking(orderId) {
+  state.view = 'tracking';
+  state.trackedOrder = null;
+  render();
+  pollOrderStatus(orderId);
+  if (trackingInterval) clearInterval(trackingInterval);
+  trackingInterval = setInterval(() => pollOrderStatus(orderId), 5000);
+}
+function stopOrderTracking() {
+  if (trackingInterval) { clearInterval(trackingInterval); trackingInterval = null; }
+}
+async function pollOrderStatus(orderId) {
+  const { data, error } = await sb.rpc('get_order_status', { p_order_id: orderId });
+  if (error || !data) return;
+  state.trackedOrder = data;
+  if (state.view === 'tracking') renderTracking();
+  if (data.status === 'served' || data.status === 'cancelled') stopOrderTracking();
+}
+function backFromTracking() {
+  stopOrderTracking();
+  state.view = 'menu';
+  render();
+}
+const TRACKING_STEPS = ['pending', 'preparing', 'ready', 'served'];
+function renderTracking() {
+  const o = state.trackedOrder;
+  if (!o) { root.innerHTML = '<div class="center-screen">Loading order status…</div>'; return; }
+
+  const isCancelled = o.status === 'cancelled';
+  const currentStepIndex = TRACKING_STEPS.indexOf(o.status);
+  const statusLabels = { pending: 'Order received', preparing: 'Being prepared', ready: 'Ready for pickup', served: 'Served — enjoy!' };
+
+  root.innerHTML = `
+    <div class="wrap" style="padding-top:24px">
+      <button class="btn-ghost btn" onclick="backFromTracking()" style="margin-bottom:16px">← Back to menu</button>
+      <div class="sheet-title" style="margin-bottom:4px">Order #${o.id.slice(0,8)}</div>
+      <p class="sheet-desc">Placed ${new Date(o.created_at).toLocaleTimeString()}</p>
+
+      ${isCancelled ? `
+        <div class="msg error" style="font-size:15px;padding:16px">This order was cancelled. Please check with staff.</div>
+      ` : `
+        <div style="display:flex;justify-content:space-between;margin:24px 0 8px">
+          ${TRACKING_STEPS.map((step, i) => `
+            <div style="flex:1;text-align:center">
+              <div style="width:32px;height:32px;border-radius:50%;margin:0 auto 6px;display:flex;align-items:center;justify-content:center;
+                          background:${i <= currentStepIndex ? 'var(--gold)' : '#fff'};border:2px solid var(--gold);color:${i <= currentStepIndex ? 'var(--espresso)' : 'var(--gold)'};font-weight:bold">
+                ${i < currentStepIndex ? '✓' : i + 1}
+              </div>
+              <div style="font-size:10px;color:${i <= currentStepIndex ? 'var(--ink)' : 'var(--ink-soft)'}">${statusLabels[step]}</div>
+            </div>
+          `).join('')}
+        </div>
+        <div class="loyalty-progress-track" style="margin:8px 0 20px">
+          <div class="loyalty-progress-fill" style="width:${((currentStepIndex) / (TRACKING_STEPS.length - 1)) * 100}%"></div>
+        </div>
+      `}
+
+      <div style="background:#fff;border-radius:10px;padding:16px;border:1px solid var(--line)">
+        <div class="sheet-title" style="font-size:15px;margin-bottom:10px">Items</div>
+        ${(o.items || []).map(i => `
+          <div class="cart-line">
+            <div class="cart-line-info">
+              <div class="cart-line-name">${i.quantity}× ${escapeHtml(i.item_name)}</div>
+              ${i.selected_variants && i.selected_variants.length ? `<div class="cart-line-variants">${escapeHtml(i.selected_variants.map(v=>v.name).join(', '))}</div>` : ''}
+            </div>
+            <div class="item-price">${money(i.line_total)} EGP</div>
+          </div>
+        `).join('')}
+        ${o.reward_discount > 0 ? `<div class="cart-total-row reward-row"><span>Reward applied</span><span>-${money(o.reward_discount)} EGP</span></div>` : ''}
+        <div class="cart-total-row grand"><span>Total</span><span>${money(o.total)} EGP</span></div>
+      </div>
+      <p style="font-size:11px;color:var(--ink-soft);text-align:center;margin-top:14px">Updates automatically every few seconds</p>
+    </div>
+  `;
+}
 
 function renderMenu() {
   const d = state.data;
