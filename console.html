@@ -1048,7 +1048,7 @@ function renderHome() {
   const unreadCount = myTickets.filter(t => !t.tenant_read_at || (t.updated_at && new Date(t.updated_at) > new Date(t.tenant_read_at))).length;
   root.innerHTML = `
     <div class="tabs">
-      ${['orders','menu','tables','loyalty','reports','billing','settings','support'].map(t => `
+      ${['orders','customers','menu','tables','loyalty','reports','billing','settings','support'].map(t => `
         <div class="tab ${state.homeTab === t ? 'active' : ''}" onclick="switchTab('${t}')">${t}${t === 'support' && unreadCount > 0 ? ` <span class="pill error" style="margin-left:4px">${unreadCount}</span>` : ''}</div>
       `).join('')}
     </div>
@@ -1056,6 +1056,7 @@ function renderHome() {
   `;
   const body = document.getElementById('tab-body');
   if (state.homeTab === 'orders') body.innerHTML = renderOrdersTab();
+  if (state.homeTab === 'customers') { renderCustomersTab(); loadTenantCustomers(); }
   if (state.homeTab === 'menu') body.innerHTML = renderMenuTab();
   if (state.homeTab === 'tables') body.innerHTML = renderTablesTab();
   if (state.homeTab === 'loyalty') body.innerHTML = renderLoyaltyTab();
@@ -1180,6 +1181,45 @@ function computeReportStats(orders) {
   });
 
   return { grossSales, totalDiscounts, netSales, orderCount, avgOrderValue, cancelledCount, rewardOrders, statusCounts, itemBreakdown, hourMap, feePercent, platformFee, netAfterPlatformFee };
+}
+
+// ============================================================
+// CUSTOMERS — this café's own customer directory (name/phone, order
+// history AT THIS CAFÉ only, loyalty progress). Never shows a customer's
+// activity at other cafés, even though the underlying identity is shared
+// platform-wide via phone verification.
+// ============================================================
+let tenantCustomers = [];
+async function loadTenantCustomers() {
+  const { data } = await sb.rpc('get_tenant_customers', { p_tenant_id: state.tenant.id });
+  tenantCustomers = data || [];
+  if (state.homeTab === 'customers') renderCustomersTab();
+}
+function renderCustomersTab() {
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="ticket">
+      <h2>Customers (${tenantCustomers.length})</h2>
+      <p class="lead">Everyone who has signed in with their phone and ordered from you — names are optional, so some may only show a phone number.</p>
+      ${tenantCustomers.length === 0 ? '<div class="empty">No signed-in customers yet. Guest orders (no phone sign-in) aren\'t tracked here.</div>' : `
+        <table>
+          <thead><tr><th>Customer</th><th>Orders here</th><th>Spent here</th><th>Loyalty</th><th>Last order</th></tr></thead>
+          <tbody>
+            ${tenantCustomers.map(c => `
+              <tr>
+                <td><strong>${escapeHtml(c.display_name || 'No name given')}</strong><br><span class="small">${escapeHtml(c.phone_number)}</span></td>
+                <td>${c.order_count_here}</td>
+                <td>${money(c.total_spent_here)} EGP</td>
+                <td>${c.loyalty_progress != null ? `<span class="pill warn">${c.loyalty_progress} items</span>` : '<span class="small">—</span>'}</td>
+                <td style="font-family:var(--mono);font-size:11px">${new Date(c.last_order_at).toLocaleDateString()}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>
+  `;
 }
 
 function renderReportsTab() {
