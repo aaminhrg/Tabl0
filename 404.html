@@ -420,8 +420,26 @@ async function placeOrder() {
   state.lastOrder = data;
   state.cart = [];
   state.showCartSheet = false;
-  state.view = 'confirmation';
   if (state.loyalty && state.loyalty.signed_in) await refreshLoyalty();
+
+  // If this café has a real payment gateway connected, send the customer to
+  // pay online. If anything fails here, fall back to pay-at-counter rather
+  // than blocking the order — the order itself already succeeded.
+  if (state.data.tenant.payment_gateway_status === 'configured') {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/paymob-create-payment`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_id: data.order_id })
+      });
+      const paymentData = await res.json();
+      if (paymentData.checkout_url) {
+        window.location.href = paymentData.checkout_url;
+        return;
+      }
+    } catch (e) { /* fall through to pay-at-counter confirmation below */ }
+  }
+
+  state.view = 'confirmation';
   render();
 }
 
