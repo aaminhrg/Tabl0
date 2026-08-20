@@ -907,6 +907,11 @@ function paymentFooterText() {
 }
 
 function showPaymobCheckout(checkoutUrl, orderId) {
+  // The normal render() dispatcher clears leftover overlays (cart sheet,
+  // OTP sheet, etc.) — since this function writes directly to root.innerHTML
+  // instead of going through render(), that cleanup has to happen here too,
+  // or the cart sheet stays stacked on top of the payment form underneath it.
+  document.querySelectorAll('.overlay').forEach(el => el.remove());
   state.view = 'paymob-checkout';
   root.innerHTML = `
     <div style="padding:16px">
