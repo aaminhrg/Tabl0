@@ -236,6 +236,10 @@ let state = {
   lastOrder: null,
   msg: null
 };
+// Declared here (not near the other order-tracking code further down) because
+// boot() can call startOrderTracking() synchronously, with no await first —
+// this must exist before that happens, or accessing it throws a TDZ error.
+let trackingInterval = null;
 
 const root = document.getElementById('app-root');
 
@@ -524,7 +528,6 @@ function renderConfirmation() {
 function startNewOrder() { state.view = 'menu'; render(); }
 
 // ---------- Order status tracking (polls every 5s, matching native app behavior) ----------
-let trackingInterval = null;
 function startOrderTracking(orderId) {
   state.view = 'tracking';
   state.trackedOrder = null;
@@ -545,6 +548,14 @@ async function pollOrderStatus(orderId) {
 }
 function backFromTracking() {
   stopOrderTracking();
+  // If we got here via a payment-gateway return, state.data was never
+  // loaded (Paymob's redirect URL can't carry which table an order came
+  // from) — do a real navigation using the order's own tenant/table info
+  // instead of trying to in-place render a menu we never fetched.
+  if (!state.data && state.trackedOrder && state.trackedOrder.tenant_slug && state.trackedOrder.table_code) {
+    window.location.href = `${window.location.origin}/t/${state.trackedOrder.tenant_slug}/${state.trackedOrder.table_code}`;
+    return;
+  }
   state.view = 'menu';
   render();
 }
