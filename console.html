@@ -428,7 +428,6 @@ function renderPlanSelection() {
           <div style="font-size:28px;font-weight:bold;margin:8px 0">800 EGP<span style="font-size:14px;font-weight:normal;color:var(--ink-soft)">/month</span></div>
           <p class="small">0% per order — keep 100% of every sale. Best once you're doing steady volume.</p>
           <button class="btn btn-solid" style="width:100%;margin-top:14px" onclick="choosePlan('pro')">Choose Pro</button>
-          <button class="btn" style="width:100%;margin-top:8px;font-size:12px" onclick="choosePlan('pro-trial')">Or try free for your first 30 days</button>
         </div>
       </div>
       <p class="small" style="margin-top:16px;text-align:center">You can switch plans anytime from Settings.</p>
@@ -441,15 +440,6 @@ async function choosePlan(plan) {
     await sb.rpc('set_billing_plan', { p_tenant_id: state.tenant.id, p_plan: 'payg' });
     state.tenant.billing_plan = 'payg';
     state.tenant.platform_fee_percent = 0.8;
-    state.step = 2;
-    state.view = 'wizard';
-    render();
-  } else if (plan === 'pro-trial') {
-    const { data } = await sb.rpc('start_pro_trial', { p_tenant_id: state.tenant.id });
-    state.tenant.billing_plan = 'pro';
-    state.tenant.platform_fee_percent = 0;
-    state.tenant.subscription_status = 'trialing';
-    if (data && data.trial_ends_at) state.tenant.trial_ends_at = data.trial_ends_at;
     state.step = 2;
     state.view = 'wizard';
     render();
@@ -1565,9 +1555,6 @@ function renderBillingTab() {
           <h3 style="font-size:16px">Pro ${plan==='pro' ? `<span class="pill ${t.subscription_status==='active'?'ok':'warn'}">${escapeHtml(t.subscription_status)}</span>` : ''}</h3>
           <div style="font-size:22px;font-weight:bold;margin:6px 0">800 EGP<span style="font-size:13px;font-weight:normal;color:var(--ink-soft)">/month</span></div>
           <p class="small">0% per order.</p>
-          ${plan==='pro' && t.subscription_status==='trialing' && t.trial_ends_at ? `
-            <p class="small" style="color:var(--gold);margin-top:6px">Free trial ends ${new Date(t.trial_ends_at).toLocaleDateString()} — switch to a paid plan before then to keep the 0% rate.</p>
-          ` : ''}
           ${plan!=='pro' ? '<button class="btn btn-sm" onclick="startProCheckout()">Switch to this plan</button>' : ''}
         </div>
       </div>
