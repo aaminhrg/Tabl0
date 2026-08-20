@@ -766,7 +766,7 @@ function renderCartSheet() {
       <button class="btn" ${state.cart.length === 0 ? 'disabled' : ''} onclick="placeOrder()" style="margin-top:14px">
         Send order to kitchen
       </button>
-      <p style="font-size:11px;color:var(--ink-soft);text-align:center;margin-top:10px">Pay at the counter when your order arrives · card/wallet payment coming soon</p>
+      <p style="font-size:11px;color:var(--ink-soft);text-align:center;margin-top:10px">${paymentFooterText()}</p>
     </div>
   `;
   document.body.appendChild(overlay);
@@ -859,6 +859,15 @@ function categoryIcon(categoryName) {
   if (name.includes('sandwich') || name.includes('food') || name.includes('savory')) return '🥪';
   if (name.includes('drink') || name.includes('coffee') || name.includes('tea')) return '☕';
   return '🍽️';
+}
+
+function paymentFooterText() {
+  const status = state.data && state.data.tenant.payment_gateway_status;
+  const provider = state.data && state.data.tenant.payment_gateway_provider;
+  if (status !== 'configured' || !provider) return "Pay at the counter when your order arrives · card/wallet payment coming soon";
+  if (provider === 'fawry') return "You'll get a reference number to pay with cash at any Fawry location";
+  const providerNames = { paymob: 'Paymob', kashier: 'Kashier', paytabs: 'PayTabs', stripe: 'Stripe' };
+  return `You'll be redirected to pay securely via ${providerNames[provider] || provider}`;
 }
 
 function money(n) { return Number(n || 0).toFixed(2); }
