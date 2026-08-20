@@ -1913,9 +1913,9 @@ const PAYMENT_PROVIDERS = {
     label: 'Kashier', flow: 'credentials',
     blurb: 'Modern Egyptian gateway with a clean checkout experience.',
     fields: [
-      { key: 'merchant_id', label: 'Merchant ID', placeholder: 'From Kashier Dashboard' },
-      { key: 'api_key', label: 'API Key', placeholder: 'From Kashier Dashboard → API Keys' },
-      { key: 'secret_key', label: 'Secret Key', placeholder: 'From Kashier Dashboard → API Keys' }
+      { key: 'merchant_id', label: 'Merchant ID (MID)', placeholder: 'e.g. MID-46-111 — shown under your username in the dashboard' },
+      { key: 'api_key', label: 'Payment API Key', placeholder: 'From "Payment API Keys" section — the UUID, e.g. d6f77d13-...' },
+      { key: 'secret_key', label: 'Secret Key (not used for checkout — kept for future direct API calls)', placeholder: 'From "Secret Keys" section' }
     ]
   },
   paytabs: {
