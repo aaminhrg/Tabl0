@@ -451,6 +451,13 @@ async function placeOrder() {
       });
       const paymentData = await res.json();
       if (paymentData.checkout_url) {
+        if (gatewayProvider === 'paymob') {
+          // Paymob's checkout is specifically an iframe PRODUCT — embedding
+          // it (instead of navigating the whole tab to it) is the pattern
+          // their post-payment redirect settings actually expect.
+          showPaymobCheckout(paymentData.checkout_url, data.order_id);
+          return;
+        }
         window.location.href = paymentData.checkout_url;
         return;
       }
@@ -886,6 +893,31 @@ function paymentFooterText() {
   if (provider === 'fawry') return "You'll get a reference number to pay with cash at any Fawry location";
   const providerNames = { paymob: 'Paymob', kashier: 'Kashier', paytabs: 'PayTabs', stripe: 'Stripe' };
   return `You'll be redirected to pay securely via ${providerNames[provider] || provider}`;
+}
+
+function showPaymobCheckout(checkoutUrl, orderId) {
+  state.view = 'paymob-checkout';
+  root.innerHTML = `
+    <div style="padding:16px">
+      <div style="text-align:center;margin-bottom:12px">
+        <p style="font-size:13px;color:var(--ink-soft)">Complete your payment below. You'll be returned automatically once it's confirmed.</p>
+      </div>
+      <iframe src="${escapeAttr(checkoutUrl)}" style="width:100%;height:70vh;border:1px solid var(--line);border-radius:12px;background:#fff"></iframe>
+      <div style="text-align:center;margin-top:16px">
+        <button class="btn btn-ghost" onclick="startOrderTracking('${orderId}')">I've completed payment — check my order</button>
+      </div>
+    </div>
+  `;
+  // Independent of whatever the iframe/Paymob's own redirect does, poll our
+  // own order status — the webhook is the real source of truth. The moment
+  // it flips to paid, move the customer forward automatically.
+  const pollInterval = setInterval(async () => {
+    const { data } = await sb.rpc('get_order_status', { p_order_id: orderId });
+    if (data && data.payment_status === 'paid') {
+      clearInterval(pollInterval);
+      startOrderTracking(orderId);
+    }
+  }, 4000);
 }
 
 function money(n) { return Number(n || 0).toFixed(2); }
