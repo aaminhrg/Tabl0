@@ -193,6 +193,15 @@ const topbarRight = document.getElementById('topbar-right');
 
 // ---------- Boot ----------
 async function boot() {
+  // Must happen BEFORE the session check below — with PKCE flow (current
+  // supabase-js default), an invite link has no session at all until this
+  // exchange runs, so gating this behind "if session exists" never fires.
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('code')) {
+    const isPendingInvite = await checkForPendingInvite();
+    if (isPendingInvite) return;
+  }
+
   const { data: { session } } = await sb.auth.getSession();
   if (session) {
     state.user = session.user;
@@ -869,13 +878,25 @@ function doRegisterBusiness() {
 // prompt them to set a real password before completing their join.
 // ============================================================
 async function checkForPendingInvite() {
+  // Newer supabase-js defaults to PKCE flow for invite links — the link
+  // carries a ?code=... param that needs an explicit exchange to actually
+  // establish a session, rather than the older hash-based auto-detection.
+  // Without this, updateUser() later fails with "Auth session missing!"
+  // even though the invite link itself was completely valid.
+  const urlParams = new URLSearchParams(window.location.search);
+  const authCode = urlParams.get('code');
+  if (authCode) {
+    const { error } = await sb.auth.exchangeCodeForSession(window.location.href);
+    if (error) console.error('Failed to exchange invite code for session:', error);
+  }
+
   const { data: { session } } = await sb.auth.getSession();
   if (!session) return false;
   // Supabase includes type=invite in the URL hash when this session came
   // from an invite link (not a normal sign-in) — check both the raw hash
   // (before Supabase's client strips it) and the user's own metadata as a
   // fallback, since the hash may already be gone by the time this runs.
-  const cameFromInviteLink = window.location.hash.includes('type=invite');
+  const cameFromInviteLink = window.location.hash.includes('type=invite') || authCode;
   const hasPendingInviteMetadata = !!(session.user.user_metadata && session.user.user_metadata.invited_tenant_id);
   if (cameFromInviteLink || hasPendingInviteMetadata) {
     state.user = session.user;
