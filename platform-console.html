@@ -429,9 +429,10 @@ function exportAdminReportExcel() {
     ['Order Count', stats.orderCount], ['Average Order Value', stats.avgOrderValue.toFixed(2)]
   ]), 'Summary');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Business','Orders','Revenue (EGP)'], ...stats.byTenant.map(t=>[t.name,t.orders,t.revenue.toFixed(2)])]), 'By Business');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Payment Method','Orders','Total (EGP)'], ...stats.byMethod.map(m=>[m.label,m.count,m.total.toFixed(2)])]), 'Payment Methods');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['Order ID','Business','Table','Status','Subtotal','Discount','Total','Date'],
-    ...adminReportState.orders.map(o => [o.id, o.tenant_name, o.table_code||'', o.status, Number(o.subtotal||0).toFixed(2), Number(o.reward_discount||0).toFixed(2), Number(o.total||0).toFixed(2), new Date(o.created_at).toLocaleString()])
+    ['Order ID','Business','Table','Status','Payment Method','Payment Reference','Subtotal','Discount','Total','Date'],
+    ...adminReportState.orders.map(o => [o.id, o.tenant_name, o.table_code||'', o.status, o.payment_method||'counter', o.payment_reference||'', Number(o.subtotal||0).toFixed(2), Number(o.reward_discount||0).toFixed(2), Number(o.total||0).toFixed(2), new Date(o.created_at).toLocaleString()])
   ]), 'Order Detail');
   XLSX.writeFile(wb, `Tabl0_Platform_Report_${adminReportState.rangeLabel.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
@@ -447,6 +448,8 @@ function exportAdminReportPdf() {
   ], theme: 'grid', headStyles: { fillColor: [43,29,20] } });
   doc.autoTable({ startY: doc.lastAutoTable.finalY+10, head: [['Business','Orders','Revenue']],
     body: stats.byTenant.map(t=>[t.name,t.orders,money(t.revenue)]), theme: 'striped', headStyles: { fillColor: [43,29,20] } });
+  doc.autoTable({ startY: doc.lastAutoTable.finalY+10, head: [['Payment Method','Orders','Total']],
+    body: stats.byMethod.map(m=>[m.label,m.count,money(m.total)]), theme: 'grid', headStyles: { fillColor: [43,29,20] } });
   doc.save(`Tabl0_Platform_Report_${adminReportState.rangeLabel.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.pdf`);
 }
 
@@ -680,6 +683,7 @@ async function loadAdminUsers() {
   const { data } = await sb.rpc('get_admin_users');
   adminUsersData = data || [];
   renderAdminUsersTab();
+  loadOrphanedAccounts();
 }
 
 function renderAdminUsersTab() {
@@ -717,7 +721,26 @@ function renderAdminUsersTab() {
         </table>
       `}
     </div>
+    <div class="ticket" id="orphaned-accounts-section">
+      <h2>Accounts with no café affiliation</h2>
+      <p class="lead">Accounts that used to belong to a café (e.g. removed kitchen staff) but no longer do. They still exist and will block re-inviting the same email until deleted here.</p>
+      <div id="orphaned-list" class="small">Loading…</div>
+    </div>
   `;
+}
+
+async function loadOrphanedAccounts() {
+  const { data } = await sb.rpc('get_orphaned_accounts');
+  const list = document.getElementById('orphaned-list');
+  if (!list) return;
+  const accounts = data || [];
+  if (accounts.length === 0) { list.innerHTML = '<div class="empty">None — every account is currently affiliated with a café.</div>'; return; }
+  list.innerHTML = accounts.map(a => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px dashed var(--line)">
+      <div><strong>${escapeHtml(a.email)}</strong><div class="small">Joined ${new Date(a.created_at).toLocaleDateString()} · Last sign-in ${a.last_sign_in_at ? new Date(a.last_sign_in_at).toLocaleDateString() : 'Never'}</div></div>
+      <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" onclick="deleteUserAccount('${a.user_id}','${escapeHtml(a.email)}')">Delete account</button>
+    </div>
+  `).join('');
 }
 
 function filterAdminUsers(value) {
