@@ -1180,7 +1180,20 @@ function computeReportStats(orders) {
     hourMap[h] = (hourMap[h] || 0) + 1;
   });
 
-  return { grossSales, totalDiscounts, netSales, orderCount, avgOrderValue, cancelledCount, rewardOrders, statusCounts, itemBreakdown, hourMap, feePercent, platformFee, netAfterPlatformFee };
+  // How customers actually paid — pay at counter vs which specific gateway.
+  // Recorded per-order at the moment of payment, not inferred from the
+  // café's current gateway setting (which could have changed since).
+  const methodLabels = { counter: 'Pay at counter', paymob: 'Paymob', kashier: 'Kashier', paytabs: 'PayTabs', fawry: 'Fawry', stripe: 'Stripe' };
+  const methodMap = {};
+  validOrders.forEach(o => {
+    const method = o.payment_method || 'counter';
+    if (!methodMap[method]) methodMap[method] = { method, label: methodLabels[method] || method, count: 0, total: 0 };
+    methodMap[method].count += 1;
+    methodMap[method].total += Number(o.total || 0);
+  });
+  const paymentMethodBreakdown = Object.values(methodMap).sort((a, b) => b.total - a.total);
+
+  return { grossSales, totalDiscounts, netSales, orderCount, avgOrderValue, cancelledCount, rewardOrders, statusCounts, itemBreakdown, hourMap, feePercent, platformFee, netAfterPlatformFee, paymentMethodBreakdown };
 }
 
 // ============================================================
@@ -1281,6 +1294,19 @@ function renderReportsTab() {
         `}
       </div>
 
+      <div class="ticket">
+        <h2>How customers paid</h2>
+        ${stats.paymentMethodBreakdown.length === 0 ? '<div class="empty">No completed orders in this range.</div>' : `
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr><th style="text-align:left;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Method</th><th style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Orders</th><th style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Total</th></tr></thead>
+            <tbody>
+              ${stats.paymentMethodBreakdown.map(m => `<tr><td style="padding:6px;border-bottom:1px dashed var(--line)">${escapeHtml(m.label)}</td><td style="text-align:right;padding:6px;border-bottom:1px dashed var(--line)">${m.count}</td><td style="text-align:right;padding:6px;border-bottom:1px dashed var(--line)">${money(m.total)} EGP</td></tr>`).join('')}
+            </tbody>
+          </table>
+          <p class="small" style="margin-top:8px">Useful for reconciling against each gateway's own dashboard — full transaction references are in the order detail export below.</p>
+        `}
+      </div>
+
       ${stats.cancelledCount > 0 ? `
       <div class="ticket">
         <h2>Cancelled orders (${stats.cancelledCount})</h2>
@@ -1330,17 +1356,22 @@ function exportReportExcel() {
   stats.itemBreakdown.forEach(i => itemRows.push([i.name, i.qty, i.revenue.toFixed(2)]));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(itemRows), 'Sales by Item');
 
-  const orderRows = [['Order ID', 'Date/Time', 'Table', 'Status', 'Payment Status', 'Items', 'Subtotal', 'Discount', 'Total', 'Cancellation Reason', 'Notes']];
+  const orderRows = [['Order ID', 'Date/Time', 'Table', 'Status', 'Payment Status', 'Payment Method', 'Payment Reference', 'Items', 'Subtotal', 'Discount', 'Total', 'Cancellation Reason', 'Notes']];
   reportState.orders.forEach(o => {
     const itemsSummary = o.items.map(i => `${i.quantity}x ${i.item_name}`).join('; ');
     orderRows.push([
       o.id, new Date(o.created_at).toLocaleString(), o.table_id ? o.table_id.slice(0,8) : '',
-      o.status, o.payment_status, itemsSummary,
+      o.status, o.payment_status, o.payment_method || 'counter', o.payment_reference || '', itemsSummary,
       Number(o.subtotal || 0).toFixed(2), Number(o.reward_discount || 0).toFixed(2), Number(o.total || 0).toFixed(2),
       o.cancellation_reason || '', o.notes || ''
     ]);
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(orderRows), 'Order Detail');
+
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['Payment Method', 'Orders', 'Total (EGP)'],
+    ...stats.paymentMethodBreakdown.map(m => [m.label, m.count, m.total.toFixed(2)])
+  ]), 'Payment Methods');
 
   const cancelledOrders = reportState.orders.filter(o => o.status === 'cancelled');
   if (cancelledOrders.length > 0) {
@@ -1389,15 +1420,23 @@ function exportReportPdf() {
     theme: 'striped', headStyles: { fillColor: [43, 29, 20] }
   });
 
+  doc.autoTable({
+    startY: doc.lastAutoTable.finalY + 10,
+    head: [['Payment Method', 'Orders', 'Total (EGP)']],
+    body: stats.paymentMethodBreakdown.map(m => [m.label, m.count, money(m.total)]),
+    theme: 'striped', headStyles: { fillColor: [43, 29, 20] }
+  });
+
   doc.addPage();
   doc.setFontSize(14);
   doc.text('Order Detail', 14, 18);
   doc.autoTable({
     startY: 26,
-    head: [['Time', 'Status', 'Items', 'Subtotal', 'Discount', 'Total']],
+    head: [['Time', 'Status', 'Payment', 'Items', 'Subtotal', 'Discount', 'Total']],
     body: reportState.orders.map(o => [
       new Date(o.created_at).toLocaleString(),
       o.status,
+      o.payment_method || 'counter',
       o.items.map(i => `${i.quantity}x ${i.item_name}`).join(', '),
       money(o.subtotal), money(o.reward_discount), money(o.total)
     ]),
