@@ -1150,6 +1150,11 @@ async function generateReport() {
   renderReportsTab();
 }
 
+function togglePaymentMethodDetail(method) {
+  const el = document.getElementById(`pm-detail-${method}`);
+  if (el) el.classList.toggle('hidden');
+}
+
 function computeReportStats(orders) {
   const validOrders = orders.filter(o => o.status !== 'cancelled');
   const grossSales = validOrders.reduce((s, o) => s + Number(o.subtotal || 0), 0);
@@ -1300,10 +1305,26 @@ function renderReportsTab() {
           <table style="width:100%;border-collapse:collapse">
             <thead><tr><th style="text-align:left;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Method</th><th style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Orders</th><th style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Total</th></tr></thead>
             <tbody>
-              ${stats.paymentMethodBreakdown.map(m => `<tr><td style="padding:6px;border-bottom:1px dashed var(--line)">${escapeHtml(m.label)}</td><td style="text-align:right;padding:6px;border-bottom:1px dashed var(--line)">${m.count}</td><td style="text-align:right;padding:6px;border-bottom:1px dashed var(--line)">${money(m.total)} EGP</td></tr>`).join('')}
+              ${stats.paymentMethodBreakdown.map(m => `
+                <tr style="cursor:pointer" onclick="togglePaymentMethodDetail('${m.method}')">
+                  <td style="padding:6px;border-bottom:1px dashed var(--line)">▸ ${escapeHtml(m.label)}</td>
+                  <td style="text-align:right;padding:6px;border-bottom:1px dashed var(--line)">${m.count}</td>
+                  <td style="text-align:right;padding:6px;border-bottom:1px dashed var(--line)">${money(m.total)} EGP</td>
+                </tr>
+                <tr id="pm-detail-${m.method}" class="hidden"><td colspan="3" style="padding:0">
+                  <div style="background:var(--crema);padding:10px 12px;font-size:12px">
+                    ${reportState.orders.filter(o => (o.payment_method || 'counter') === m.method && o.status !== 'cancelled').map(o => `
+                      <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed var(--line)">
+                        <span style="font-family:var(--mono)">#${o.id.slice(0,8)} · ${new Date(o.created_at).toLocaleString()}${o.payment_reference ? ` · ref: ${escapeHtml(o.payment_reference)}` : ''}</span>
+                        <span>${money(o.total)} EGP</span>
+                      </div>
+                    `).join('') || '<span class="small">No individual orders to show.</span>'}
+                  </div>
+                </td></tr>
+              `).join('')}
             </tbody>
           </table>
-          <p class="small" style="margin-top:8px">Useful for reconciling against each gateway's own dashboard — full transaction references are in the order detail export below.</p>
+          <p class="small" style="margin-top:8px">Click a method to see individual transactions — useful for reconciling against each gateway's own dashboard. Full detail is also in the export below.</p>
         `}
       </div>
 
