@@ -240,6 +240,17 @@ let state = {
 const root = document.getElementById('app-root');
 
 async function boot() {
+  // If we're returning from a payment gateway, jump straight to order
+  // tracking — no table/menu context needed, and Paymob's redirect URL is
+  // one static value per café (can't encode which table an order came
+  // from), so this path must work without ever calling resolve_table_link.
+  const urlParams = new URLSearchParams(window.location.search);
+  const returningOrderId = urlParams.get('paid_order') || urlParams.get('merchant_order_id');
+  if (returningOrderId) {
+    startOrderTracking(returningOrderId);
+    return;
+  }
+
   const target = parseTarget();
   if (!target) {
     state.view = 'error';
@@ -262,15 +273,6 @@ async function boot() {
   state.view = 'menu';
 
   if (session) await refreshLoyalty();
-
-  // If we're returning here from a payment gateway redirect, skip the menu
-  // and jump straight to live order tracking for that order.
-  const urlParams = new URLSearchParams(window.location.search);
-  const paidOrderId = urlParams.get('paid_order');
-  if (paidOrderId) {
-    startOrderTracking(paidOrderId);
-    return;
-  }
 
   render();
 }
