@@ -218,12 +218,13 @@ function renderOverview() {
 }
 
 function renderBusinesses() {
+  const gatewayLabels = { paymob: 'Paymob', kashier: 'Kashier', paytabs: 'PayTabs', fawry: 'Fawry', stripe: 'Stripe' };
   return `
     <div class="ticket">
       <h2>Registered businesses (${state.tenants.length})</h2>
       ${state.tenants.length === 0 ? '<div class="empty">No businesses registered yet.</div>' : `
         <table>
-          <thead><tr><th>Name</th><th>Owner</th><th>Orders</th><th>Revenue</th><th>Payouts</th><th>Status</th><th>Joined</th></tr></thead>
+          <thead><tr><th>Name</th><th>Owner</th><th>Orders</th><th>Revenue</th><th>Payment Gateway</th><th>Status</th><th>Joined</th></tr></thead>
           <tbody>
             ${state.tenants.map(t => `
               <tr onclick="openTenantDetail('${t.id}')">
@@ -231,7 +232,7 @@ function renderBusinesses() {
                 <td>${escapeHtml(t.owner_email || '—')}</td>
                 <td>${t.order_count}</td>
                 <td>${money(t.total_revenue)} ${escapeHtml(t.currency)}</td>
-                <td><span class="pill ${t.stripe_connect_status==='verified'?'ok':'warn'}">${escapeHtml(t.stripe_connect_status)}</span></td>
+                <td>${t.payment_gateway_status === 'configured' ? `<span class="pill ok">${escapeHtml(gatewayLabels[t.payment_gateway_provider] || t.payment_gateway_provider)}</span>` : '<span class="pill warn">Pay at counter</span>'}</td>
                 <td><span class="pill ${t.active?'ok':'error'}">${t.active?'active':'inactive'}</span></td>
                 <td style="font-family:var(--mono);font-size:12px">${new Date(t.created_at).toLocaleDateString()}</td>
               </tr>
@@ -360,8 +361,17 @@ function computeAdminStats(orders) {
     byTenant[o.tenant_name].orders += 1;
     byTenant[o.tenant_name].revenue += Number(o.total||0);
   });
+  const methodLabels = { counter: 'Pay at counter', paymob: 'Paymob', kashier: 'Kashier', paytabs: 'PayTabs', fawry: 'Fawry', stripe: 'Stripe' };
+  const byMethod = {};
+  valid.forEach(o => {
+    const method = o.payment_method || 'counter';
+    if (!byMethod[method]) byMethod[method] = { method, label: methodLabels[method] || method, count: 0, total: 0 };
+    byMethod[method].count += 1;
+    byMethod[method].total += Number(o.total||0);
+  });
   return { grossSales, totalDiscounts, netSales, orderCount: valid.length, avgOrderValue: valid.length ? netSales/valid.length : 0,
-    cancelledCount: orders.length - valid.length, byTenant: Object.values(byTenant).sort((a,b)=>b.revenue-a.revenue) };
+    cancelledCount: orders.length - valid.length, byTenant: Object.values(byTenant).sort((a,b)=>b.revenue-a.revenue),
+    byMethod: Object.values(byMethod).sort((a,b)=>b.total-a.total) };
 }
 function renderReportsTab() {
   const body = document.getElementById('tab-body');
@@ -399,6 +409,12 @@ function renderReportsTab() {
         <h2>Revenue by business</h2>
         <table><thead><tr><th>Business</th><th>Orders</th><th>Revenue</th></tr></thead>
         <tbody>${stats.byTenant.map(t => `<tr><td>${escapeHtml(t.name)}</td><td>${t.orders}</td><td>${money(t.revenue)} EGP</td></tr>`).join('')}</tbody></table>
+      </div>
+      <div class="ticket">
+        <h2>Payment methods, platform-wide</h2>
+        <p class="lead">Which gateways cafés are actually using — real adoption, not just who's connected one.</p>
+        <table><thead><tr><th>Method</th><th>Orders</th><th>Total</th></tr></thead>
+        <tbody>${stats.byMethod.map(m => `<tr><td>${escapeHtml(m.label)}</td><td>${m.count}</td><td>${money(m.total)} EGP</td></tr>`).join('')}</tbody></table>
       </div>
     `}
   `;
