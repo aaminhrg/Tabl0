@@ -383,7 +383,13 @@ function subscribeOrdersForKitchen() {
 // ---------- Auth ----------
 async function handleLogin(email, password) {
   const { error } = await sb.auth.signInWithPassword({ email, password });
-  if (error) return showMsg('login-msg', error.message, 'error');
+  if (error) {
+    // Supabase deliberately gives the same generic error whether the email
+    // doesn't exist or the password is wrong (prevents attackers probing
+    // which emails have accounts). We can't know which case this is — but
+    // we can still point people toward the right next step either way.
+    return showMsg('login-msg', "Couldn't sign in — check your email and password. If you don't have a café account yet, use \"Register your café\" instead.", 'error');
+  }
   const { data: { session } } = await sb.auth.getSession();
   state.user = session.user;
   await loadTenant();
@@ -482,11 +488,24 @@ function money(n) { return Number(n || 0).toFixed(2); }
 // WIZARD (first-time setup only — full editing lives in the tabs below)
 // ============================================================
 async function createTenant(name, address) {
+  // Slugs are already unique (random suffix), so this isn't a technical
+  // conflict — but two unrelated businesses both showing as "TC" in admin
+  // and support tools is genuinely confusing. Warn once, let them confirm
+  // rather than hard-blocking, since two real businesses could coincidentally
+  // share a short name.
+  if (!state.duplicateNameConfirmed) {
+    const { data: existing } = await sb.from('tenants').select('id').ilike('name', name).limit(1);
+    if (existing && existing.length > 0) {
+      state.duplicateNameConfirmed = true; // next click proceeds past this check
+      return showMsg('wizard-msg', `A café named "${name}" already exists on Tabl0. If this is a different business, click Continue again to proceed. If you're trying to access an existing account, sign in instead.`, 'error');
+    }
+  }
   const slug = slugify(name) + '-' + Math.random().toString(36).slice(2, 6);
   const { data, error } = await sb.from('tenants').insert({
     owner_user_id: state.user.id, slug, name, address, currency: 'EGP'
   }).select().single();
   if (error) return showMsg('wizard-msg', error.message, 'error');
+  state.duplicateNameConfirmed = false;
   state.tenant = data;
   state.step = 2;
   render();
@@ -858,17 +877,29 @@ function doSignIn() {
   handleLogin(email, password);
 }
 
-function doRegisterBusiness() {
+async function doRegisterBusiness() {
   const name = document.getElementById('reg-name').value.trim();
   const email = document.getElementById('reg-email').value.trim();
   const password = document.getElementById('reg-password').value;
-  const confirm = document.getElementById('reg-password-confirm').value;
+  const confirmPassword = document.getElementById('reg-password-confirm').value;
   const termsAccepted = document.getElementById('reg-terms').checked;
   if (!name) return showMsg('login-msg', 'Enter your café\'s name.', 'error');
   if (!email || !password) return showMsg('login-msg', 'Enter both email and password.', 'error');
   if (password.length < 6) return showMsg('login-msg', 'Password must be at least 6 characters.', 'error');
-  if (password !== confirm) return showMsg('login-msg', 'Passwords don\'t match.', 'error');
+  if (password !== confirmPassword) return showMsg('login-msg', 'Passwords don\'t match.', 'error');
   if (!termsAccepted) return showMsg('login-msg', 'You need to accept the Terms of Service and Privacy Policy to continue.', 'error');
+
+  // Catch the likely mistake this exact scenario revealed: someone whose
+  // sign-in failed (wrong password, or simply forgot they already had an
+  // account) registers a brand-new business with the same name instead.
+  // Not a hard block — different real businesses can legitimately share a
+  // name — just a confirmation step to catch the accidental case.
+  const { data: existing } = await sb.from('tenants').select('id').ilike('name', name).limit(1);
+  if (existing && existing.length > 0) {
+    const proceed = confirm(`A café named "${name}" is already registered on Tabl0. If this is your business and you're just having trouble signing in, try "Sign in" instead — or click "Forgot password" there. If this is a genuinely different business, click OK to continue registering.`);
+    if (!proceed) return;
+  }
+
   handleSignup(email, password, name);
 }
 
