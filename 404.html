@@ -262,6 +262,16 @@ async function boot() {
   state.view = 'menu';
 
   if (session) await refreshLoyalty();
+
+  // If we're returning here from a payment gateway redirect, skip the menu
+  // and jump straight to live order tracking for that order.
+  const urlParams = new URLSearchParams(window.location.search);
+  const paidOrderId = urlParams.get('paid_order');
+  if (paidOrderId) {
+    startOrderTracking(paidOrderId);
+    return;
+  }
+
   render();
 }
 boot();
@@ -429,10 +439,13 @@ async function placeOrder() {
   const gatewayStatus = state.data.tenant.payment_gateway_status;
   const gatewayProvider = state.data.tenant.payment_gateway_provider;
   if (gatewayStatus === 'configured' && gatewayProvider) {
+    // Same table page, plus a marker so we know to jump straight to order
+    // tracking when the customer is sent back here after paying.
+    const returnUrl = `${window.location.origin}${window.location.pathname}?paid_order=${data.order_id}`;
     try {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/${gatewayProvider}-create-payment`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_id: data.order_id })
+        body: JSON.stringify({ order_id: data.order_id, redirect_url: returnUrl })
       });
       const paymentData = await res.json();
       if (paymentData.checkout_url) {
@@ -442,7 +455,10 @@ async function placeOrder() {
       if (paymentData.reference_number) {
         state.lastOrder.fawryReference = paymentData.reference_number;
       }
-    } catch (e) { /* fall through to pay-at-counter confirmation below */ }
+      if (paymentData.error) {
+        console.error('Payment initiation failed:', paymentData.error);
+      }
+    } catch (e) { console.error('Payment initiation request failed:', e); }
   }
 
   state.view = 'confirmation';
