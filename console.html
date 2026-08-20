@@ -478,7 +478,7 @@ async function startProCheckout() {
     alert('Pro plan checkout isn\'t available yet: ' + data.error + '\n\nYou can continue with Pay-as-you-go for now and switch to Pro later from Settings once it\'s set up.');
     return;
   }
-  window.location.href = data.url;
+  window.location.href = data.checkout_url;
 }
 async function handleLogout() { await sb.auth.signOut(); }
 
