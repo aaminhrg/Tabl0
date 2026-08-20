@@ -1565,13 +1565,31 @@ function renderVariantSummary(selectedVariants) {
 function renderKitchen() {
   topbarRight.innerHTML = `<span class="userline">Kitchen · ${escapeHtml(state.tenant ? state.tenant.name : '')}</span><button class="btn" onclick="handleLogout()">Sign out</button>`;
 
-  const active = state.orders.filter(o => o.status !== 'served' && o.status !== 'cancelled');
+  // For cafés with online payment enabled, an order shouldn't be actionable
+  // by the kitchen until it's actually confirmed paid — otherwise a
+  // customer could abandon checkout entirely and still get their order
+  // made. Cafés on "pay at counter" (no gateway connected) are unaffected,
+  // since that flow always expected payment to happen after preparation.
+  const requiresOnlinePayment = state.tenant && state.tenant.payment_gateway_status === 'configured';
+  const visibleOrders = requiresOnlinePayment
+    ? state.orders.filter(o => o.payment_status === 'paid')
+    : state.orders;
+  const awaitingPayment = requiresOnlinePayment
+    ? state.orders.filter(o => o.payment_status !== 'paid' && o.status !== 'cancelled')
+    : [];
+
+  const active = visibleOrders.filter(o => o.status !== 'served' && o.status !== 'cancelled');
   const pending = active.filter(o => o.status === 'pending');
   const preparing = active.filter(o => o.status === 'preparing');
   const ready = active.filter(o => o.status === 'ready');
 
   root.innerHTML = `
     <div style="padding:20px">
+      ${awaitingPayment.length > 0 ? `
+        <div class="msg" style="background:rgba(107,91,71,0.1);color:var(--ink-soft);border:1px solid var(--line);font-size:13px;padding:10px 16px;margin-bottom:12px">
+          ${awaitingPayment.length} order${awaitingPayment.length===1?'':'s'} waiting on payment confirmation — not shown here until paid.
+        </div>
+      ` : ''}
       ${!audioUnlocked ? `
         <div class="msg" style="background:rgba(192,138,46,0.15);color:var(--gold);border:1px solid var(--gold);font-size:15px;padding:14px 18px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">
           <span>🔔 Tap to enable sound alerts for new orders — required once per session, browsers block sound otherwise.</span>
