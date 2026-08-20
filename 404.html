@@ -3,16 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Café Console</title>
+<title>Order</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 <style>
   :root {
     --espresso: #2B1D14;
-    --espresso-2: #3D2B1F;
     --crema: #F2E9DC;
     --paper: #FAF6EF;
     --gold: #C08A2E;
@@ -22,2036 +17,880 @@
     --ink-soft: #6B5B47;
     --error: #A63D2F;
     --ok: #3D6B4A;
-    --info: #2D6E8C;
-    --radius: 3px;
+    --radius: 10px;
     --mono: 'Courier New', Courier, monospace;
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body {
-    margin: 0;
-    background: var(--espresso);
-    color: var(--ink);
-    font-family: Georgia, 'Times New Roman', serif;
-    min-height: 100vh;
+    margin: 0; background: var(--crema); color: var(--ink);
+    font-family: Georgia, 'Times New Roman', serif; min-height: 100vh; padding-bottom: 90px;
   }
-  .topbar {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 18px 28px; background: var(--espresso-2); border-bottom: 2px solid var(--gold);
+  .hero {
+    background: var(--espresso); color: var(--crema); padding: 22px 20px 26px;
+    border-bottom: 3px solid var(--gold); position: relative; overflow: hidden;
   }
-  .brand { color: var(--crema); font-size: 20px; letter-spacing: 0.08em; text-transform: uppercase; }
-  .brand span { color: var(--gold-bright); }
-  .topbar-right { display:flex; align-items:center; gap:14px; }
-  .userline { color: var(--line); font-family: var(--mono); font-size: 12px; }
-  .btn {
-    font-family: var(--mono); font-size: 13px; letter-spacing: 0.03em;
-    padding: 9px 16px; border: 1px solid var(--gold); background: transparent;
-    color: var(--gold-bright); cursor: pointer; border-radius: var(--radius); transition: background .15s;
+  .hero::after {
+    content: ""; position: absolute; top: -40%; right: -10%; width: 220px; height: 220px;
+    background: radial-gradient(circle, rgba(217,164,76,0.18), transparent 70%); border-radius: 50%; pointer-events: none;
   }
-  .btn:hover { background: rgba(192,138,46,0.15); }
-  .btn-solid { background: var(--gold); color: var(--espresso); border: 1px solid var(--gold); font-weight: bold; }
-  .btn-solid:hover { background: var(--gold-bright); }
-  .btn-danger { border-color: var(--error); color: var(--error); }
-  .btn-danger:hover { background: rgba(166,61,47,0.12); }
-  .btn-sm { padding: 5px 10px; font-size: 11px; }
+  .hero-slug { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-bright); margin-bottom: 4px; }
+  .hero-name { font-size: 24px; margin: 0 0 4px; }
+  .hero-table { font-family: var(--mono); font-size: 12px; color: var(--line); }
+
+  /* Category tabs — bordered pills, active = brand-colored border + text */
+  .category-nav {
+    position: sticky; top: 0; z-index: 30; background: var(--crema);
+    display: flex; gap: 10px; padding: 14px 16px; overflow-x: auto;
+    border-bottom: 1px solid var(--line); scrollbar-width: none; -ms-overflow-style: none;
+  }
+  .category-nav::-webkit-scrollbar { display: none; }
+  .category-chip {
+    flex: 0 0 auto; font-family: Georgia, serif; font-size: 13px; font-weight: bold;
+    padding: 10px 18px; border-radius: 10px; background: #fff; border: 1.5px solid var(--line);
+    color: var(--ink-soft); cursor: pointer; white-space: nowrap; text-align: center;
+    transition: transform .12s ease, border-color .15s, color .15s;
+  }
+  .category-chip.active { border-color: var(--gold); color: var(--gold); }
+  .category-chip:active { transform: scale(0.94); }
+
+  .wrap { max-width: 640px; margin: 0 auto; padding: 18px 16px; }
+
+  .loyalty-banner {
+    background: #fff; border: 1px solid var(--gold); border-radius: var(--radius);
+    padding: 12px 16px; margin-bottom: 16px; display:flex; align-items:center; gap: 12px;
+  }
+  .loyalty-progress-track { flex:1; height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  .loyalty-progress-fill { height: 100%; background: var(--gold); transition: width .4s ease; }
+  .loyalty-text { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+
+  .signin-strip {
+    background: #fff; border: 1px dashed var(--line); border-radius: var(--radius);
+    padding: 10px 14px; margin-bottom: 16px; font-family: var(--mono); font-size: 12px;
+    color: var(--ink-soft); display:flex; justify-content:space-between; align-items:center; gap:10px;
+  }
+  .signin-strip a { color: var(--gold); cursor: pointer; text-decoration: underline; }
+
+  /* Section header — centered title flanked by decorative divider lines */
+  h2 {
+    font-size: 20px; text-align: center; color: var(--ink); font-weight: bold;
+    margin: 30px 0 18px; display: flex; align-items: center; gap: 14px; scroll-margin-top: 70px;
+  }
+  h2::before, h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+  /* Menu grid — photo-forward cards, 2 columns */
+  .menu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .item {
+    background: #fff; border-radius: 16px; overflow: hidden; cursor: pointer;
+    border: 1px solid var(--line); box-shadow: 0 2px 8px rgba(43,29,20,0.06);
+    transition: transform .1s ease, box-shadow .15s ease; display: flex; flex-direction: column;
+  }
+  .item:active { transform: scale(0.97); }
+  .item-img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; background: var(--crema); }
+  .item-img-placeholder {
+    width: 100%; aspect-ratio: 1 / 1; display:flex; align-items:center; justify-content:center;
+    font-size: 42px; background: linear-gradient(135deg, var(--crema), var(--line)); color: var(--ink-soft);
+  }
+  .item-info { padding: 10px 12px 4px; flex: 1; }
+  .item-title { font-size: 14px; font-weight: bold; line-height: 1.25; text-transform: uppercase; letter-spacing: 0.01em; }
+  .item-desc { font-size: 12px; color: var(--ink-soft); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .item.sold-out { opacity: 0.5; cursor: not-allowed; }
+  .item.sold-out:active { transform: none; }
+  .sold-out-tag { font-family: var(--mono); font-size: 9px; color: var(--error); text-transform: uppercase; display: block; margin-top: 2px; }
+
+  /* Price + Add pill — combined unit at the bottom of each card */
+  .item-price-row {
+    display: flex; margin: 10px 12px 12px; border-radius: 10px; overflow: hidden;
+    border: 1.5px solid var(--gold);
+  }
+  .item-price { flex: 1; font-family: var(--mono); font-size: 13px; font-weight: bold; color: var(--gold);
+    background: #fff; padding: 9px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item-add-btn {
+    flex: 0 0 auto; width: 36px; background: var(--gold); color: var(--espresso);
+    display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold;
+  }
+
+  .empty { padding: 40px 16px; text-align:center; color: var(--ink-soft); font-style: italic; }
+
+  /* Skeleton loading — replaces plain "Loading…" text for better perceived speed */
+  @keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+  .skeleton { background: linear-gradient(90deg, #E8DFCF 25%, #F2E9DC 50%, #E8DFCF 75%); background-size: 800px 100%; animation: shimmer 1.4s infinite linear; border-radius: 8px; }
+  .skeleton-item { display:flex; gap:12px; padding:12px 16px; margin-bottom:10px; }
+  .skeleton-img { width: 60px; height: 60px; border-radius: 10px; flex: 0 0 auto; }
+  .skeleton-lines { flex:1; display:flex; flex-direction:column; gap:8px; justify-content:center; }
+  .skeleton-line { height: 12px; border-radius: 4px; }
+
+  /* modal */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(43,29,20,0.6); display:flex; align-items:flex-end;
+    justify-content:center; z-index: 50; animation: fadeIn .2s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  .sheet {
+    background: var(--paper); width: 100%; max-width: 560px; border-radius: 16px 16px 0 0;
+    padding: 22px 20px 24px; max-height: 88vh; overflow-y: auto; animation: slideUp .28s cubic-bezier(.32,.72,0,1);
+  }
+  .sheet-title { font-size: 20px; font-weight: bold; margin: 0 0 4px; }
+  .sheet-desc { font-size: 13px; color: var(--ink-soft); margin-bottom: 16px; }
+  .group-title { font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); margin: 16px 0 8px; display:flex; justify-content:space-between; }
+  .req-tag { color: var(--gold); }
+  .option-row {
+    display:flex; align-items:center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line);
+    border-radius: 8px; margin-bottom: 6px; background:#fff; cursor:pointer; transition: transform .1s ease, border-color .15s, background .15s;
+  }
+  .option-row.selected { border-color: var(--gold); background: #FBF3E4; }
+  .option-row:active { transform: scale(0.98); }
+  .option-row.disabled { opacity: 0.45; cursor: not-allowed; }
+  .option-row.disabled:active { transform: none; }
+  .option-name { flex:1; }
+  .option-delta { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+
+  .qty-row { display:flex; align-items:center; gap: 14px; margin: 18px 0; justify-content:center; }
+  .qty-btn {
+    width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--gold); background: #fff;
+    color: var(--gold); font-size: 18px; cursor: pointer; transition: transform .1s ease;
+  }
+  .qty-btn:active { transform: scale(0.88); }
+  .qty-val { font-family: var(--mono); font-size: 18px; min-width: 24px; text-align:center; }
+
+  .btn { font-family: var(--mono); font-size: 14px; padding: 13px 18px; border: none; border-radius: 8px;
+    background: var(--gold); color: var(--espresso); font-weight: bold; cursor: pointer; width: 100%; transition: transform .1s ease; }
+  .btn:active:not(:disabled) { transform: scale(0.97); }
   .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .icon-btn { background:none; border:none; cursor:pointer; color: var(--ink-soft); font-family: var(--mono); font-size: 13px; padding: 4px 8px; }
-  .icon-btn:hover { color: var(--error); }
+  .btn-ghost { background: transparent; border: 1px solid var(--line); color: var(--ink-soft); font-weight: normal; }
+  .btn-close { position:absolute; top:16px; right:16px; background:none; border:none; font-size: 20px; color: var(--ink-soft); cursor:pointer; transition: transform .1s ease; }
+  .btn-close:active { transform: scale(0.85); }
 
-  .wrap { max-width: 920px; margin: 0 auto; padding: 32px 24px 80px; }
-
-  .ticket {
-    background: var(--paper); border-radius: var(--radius); position: relative;
-    padding: 30px 34px; margin-bottom: 22px; box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  .cart-bar {
+    position: fixed; bottom: 0; left: 0; right: 0; background: var(--espresso); color: var(--crema);
+    padding: 14px 18px; display:flex; align-items:center; justify-content:space-between; z-index: 40;
+    box-shadow: 0 -4px 16px rgba(0,0,0,0.3); animation: slideUp .25s ease;
   }
-  .ticket::before, .ticket::after {
-    content: ""; position: absolute; left: 0; right: 0; height: 12px;
-    background-image: radial-gradient(circle, var(--espresso) 5px, transparent 5.5px);
-    background-size: 20px 20px; background-position: 0 0;
+  .cart-bar-left { font-family: var(--mono); font-size: 13px; display:flex; align-items:center; gap:8px; }
+  .cart-count-badge {
+    background: var(--gold); color: var(--espresso); border-radius: 50%; min-width: 22px; height: 22px;
+    display:inline-flex; align-items:center; justify-content:center; font-size: 12px; font-weight:bold; padding: 0 5px;
   }
-  .ticket::before { top: -6px; }
-  .ticket::after { bottom: -6px; }
+  .cart-bar-btn { background: var(--gold); color: var(--espresso); border:none; border-radius: 8px; padding: 11px 20px; font-weight:bold; font-family: var(--mono); font-size: 13px; cursor:pointer; transition: transform .1s ease; }
+  .cart-bar-btn:active { transform: scale(0.96); }
 
-  h1 { font-size: 25px; margin: 0 0 4px; }
-  h2 { font-size: 16px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft); margin: 0 0 16px; border-bottom: 1px dashed var(--line); padding-bottom: 10px; }
-  h3 { font-size: 14px; margin: 0 0 8px; color: var(--ink); }
-  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--gold); margin-bottom: 6px; }
-  p.lead { color: var(--ink-soft); margin: 0 0 20px; }
+  .cart-line { display:flex; align-items:center; gap:10px; padding: 10px 0; border-bottom: 1px dashed var(--line); }
+  .cart-line-info { flex:1; }
+  .cart-line-name { font-weight: bold; }
+  .cart-line-variants { font-size: 12px; color: var(--ink-soft); }
+  .cart-line-remove { background:none; border:none; color: var(--error); cursor:pointer; font-family: var(--mono); font-size: 12px; }
+  .cart-total-row { display:flex; justify-content:space-between; padding: 10px 0; font-family: var(--mono); }
+  .cart-total-row.grand { font-size: 16px; font-weight:bold; border-top: 1px solid var(--line); margin-top: 8px; padding-top: 12px; }
+  .reward-row { color: var(--ok); }
 
-  label { display:block; font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; color: var(--ink-soft); margin: 12px 0 5px; }
-  input, textarea, select {
-    width: 100%; font-family: Georgia, serif; font-size: 14px; padding: 9px 11px;
-    border: 1px solid var(--line); border-radius: var(--radius); background: #fff; color: var(--ink);
+  .otp-input { text-align:center; letter-spacing: 0.4em; font-size: 22px; font-family: var(--mono); }
+  input {
+    width: 100%; font-family: Georgia, serif; font-size: 15px; padding: 11px 12px;
+    border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); margin-top: 6px;
+    transition: border-color .15s, box-shadow .15s;
   }
-  input:focus, textarea:focus, select:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
-  .row { display: flex; gap: 14px; align-items: flex-end; }
-  .row > div { flex: 1; }
-  .checkline { display:flex; align-items:center; gap:8px; margin: 12px 0; font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
-  .checkline input { width: auto; }
-
-  .tabs { display:flex; gap: 4px; margin-bottom: 22px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-  .tab {
-    font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase;
-    padding: 10px 16px; cursor: pointer; color: var(--ink-soft); border-bottom: 2px solid transparent;
-  }
-  .tab.active { color: var(--espresso); border-bottom-color: var(--gold); font-weight: bold; }
-  .tab:hover { color: var(--espresso); }
-
-  .stepper { display:flex; gap:6px; margin-bottom: 26px; }
-  .step-dot { flex:1; height: 4px; background: rgba(0,0,0,0.1); border-radius: 2px; overflow:hidden; }
-  .step-dot.done, .step-dot.active { background: var(--gold); }
-
-  .category-block { border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; background: #fff; }
-  .category-head { display:flex; align-items:center; justify-content:space-between; margin-bottom: 10px; }
-  .category-title-edit { display:flex; gap:8px; align-items:center; flex:1; }
-  .category-title-edit input { font-weight: bold; font-size: 15px; }
-
-  .item-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin-top: 10px; background: var(--crema); }
-  .item-head { display:flex; align-items:center; gap:10px; }
-  .item-head .item-name { flex:1; font-weight: bold; }
-  .item-price { font-family: var(--mono); color: var(--ink-soft); white-space: nowrap; }
-  .item-meta { display:flex; gap:8px; align-items:center; }
-  .item-detail { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
-
-  .pill { font-family: var(--mono); font-size: 10px; padding: 2px 8px; border-radius: 12px; background: rgba(61,107,74,0.12); color: var(--ok); text-transform: uppercase; }
-  .pill.warn { background: rgba(166,61,47,0.12); color: var(--error); }
-  .pill.muted { background: rgba(107,91,71,0.1); color: var(--ink-soft); }
-
-  .variant-group { border: 1px dashed var(--line); border-radius: var(--radius); padding: 10px 12px; margin-top: 8px; background: #fff; }
-  .variant-group-head { display:flex; align-items:center; gap:8px; margin-bottom: 8px; }
-  .variant-option-row { display:flex; align-items:center; gap:8px; padding: 5px 0; }
-  .variant-option-row .item-name { flex:1; font-size: 13px; }
-  .variant-add-row { display:flex; gap:8px; margin-top: 8px; }
-  .variant-add-row input, .variant-add-row select { font-size: 13px; padding: 6px 8px; }
-
-  .qr-box { text-align:center; padding: 16px; background:#fff; border-radius: var(--radius); border:1px solid var(--line); position: relative; }
-  .qr-box canvas, .qr-box img { display:block; margin: 0 auto; }
-  .qr-caption { font-family: var(--mono); font-size: 10px; color: var(--ink-soft); margin-top: 8px; word-break: break-all; }
-  .qr-delete { position:absolute; top:6px; right:6px; }
-
-  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-  @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } .row { flex-direction: column; align-items: stretch; } }
-
-  .empty { padding: 36px 20px; text-align:center; color: var(--ink-soft); font-style: italic; border: 1px dashed var(--line); border-radius: var(--radius); }
-  .msg { font-family: var(--mono); font-size: 13px; padding: 10px 14px; border-radius: var(--radius); margin-bottom: 16px; }
-  .msg.error { background: rgba(166,61,47,0.1); color: var(--error); border:1px solid rgba(166,61,47,0.3); }
-  .msg.ok { background: rgba(61,107,74,0.1); color: var(--ok); border:1px solid rgba(61,107,74,0.3); }
-
-  .status-badge { display:inline-block; font-family: var(--mono); font-size: 11px; padding: 3px 10px; border-radius: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
-  .status-pending { background: rgba(192,138,46,0.15); color: var(--gold); }
-  .status-preparing { background: rgba(61,107,74,0.15); color: var(--ok); }
-  .status-ready { background: rgba(45,110,140,0.15); color: var(--info); }
-  .status-served { background: rgba(107,91,71,0.15); color: var(--ink-soft); }
-  .status-cancelled { background: rgba(166,61,47,0.15); color: var(--error); }
-
-  .center-screen { min-height: 80vh; display:flex; align-items:center; justify-content:center; }
-  .login-card { width: 360px; }
-  .tab-link { color: var(--gold-bright); font-family: var(--mono); font-size: 12px; cursor: pointer; text-decoration: underline; }
-  .hidden { display:none !important; }
-  .nav-actions { display:flex; justify-content: space-between; margin-top: 24px; }
-  .small { font-size: 12px; color: var(--ink-soft); font-family: var(--mono); }
-  .divider { border: none; border-top: 1px dashed var(--line); margin: 18px 0; }
+  input:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px rgba(192,138,46,0.15); }
+  label { display:block; font-family: var(--mono); font-size: 11px; color: var(--ink-soft); margin-top: 14px; }
+  .msg { font-family: var(--mono); font-size: 12px; padding: 8px 12px; border-radius: 6px; margin-top: 12px; }
+  .msg.error { background: rgba(166,61,47,0.1); color: var(--error); }
+  .msg.ok { background: rgba(61,107,74,0.1); color: var(--ok); }
+  .center-screen { min-height: 100vh; display:flex; align-items:center; justify-content:center; text-align:center; padding: 20px; }
 </style>
 </head>
 <body>
-
-<div class="topbar">
-  <div class="brand">Café <span>Console</span></div>
-  <div class="topbar-right" id="topbar-right"></div>
-</div>
-
-<div class="wrap" id="app-root"></div>
+<div id="app-root"></div>
 
 <script>
 // ===== Configuration: your live Supabase project =====
 const SUPABASE_URL = 'https://yhrhqfqdxtgifahvkrnw.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_N91RJWdVtL5LgpB7u5uLAA_3NcHqYtt';
-const PLATFORM_DOMAIN = 'tabl0.com';
-
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Reads /t/{cafe_slug}/{table_code} from the path, OR ?cafe=&table= for
+// easy testing by just opening this file directly in a browser.
+function parseTarget() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('cafe') && params.get('table')) {
+    return { cafeSlug: params.get('cafe'), tableCode: params.get('table') };
+  }
+  const parts = window.location.pathname.split('/').filter(Boolean);
+  const tIdx = parts.indexOf('t');
+  if (tIdx !== -1 && parts[tIdx + 1] && parts[tIdx + 2]) {
+    return { cafeSlug: parts[tIdx + 1], tableCode: parts[tIdx + 2] };
+  }
+  return null;
+}
+
 let state = {
-  user: null,
-  tenant: null,
-  role: 'owner', // 'owner' | 'staff' | 'kitchen'
-  step: 1,
   view: 'loading',
-  homeTab: 'orders',
-  categories: [],
-  items: [],
-  variantGroups: [],
-  variantOptions: [],
-  tables: [],
-  loyalty: null,
-  orders: [],
-  orderItems: [],
-  expandedItemId: null,
-  copySourceItemId: {} // itemId -> chosen source item id for "copy variants"
+  target: null,
+  data: null,       // resolve_table_link() payload
+  cart: [],          // [{ item, quantity, selectedOptions: [...], lineKey }]
+  activeItem: null,   // item currently open in the picker sheet
+  pickerSelections: {}, // groupId -> [optionId,...]
+  pickerQty: 1,
+  showCartSheet: false,
+  loyalty: null,       // get_loyalty_status() payload
+  otpStage: null,       // null | 'enter-phone' | 'enter-code'
+  phone: '',
+  lastOrder: null,
+  msg: null
 };
 
 const root = document.getElementById('app-root');
-const topbarRight = document.getElementById('topbar-right');
 
-// ---------- Boot ----------
 async function boot() {
-  const { data: { session } } = await sb.auth.getSession();
-  if (session) {
-    state.user = session.user;
-    const isPendingInvite = await checkForPendingInvite();
-    if (isPendingInvite) return;
-    await loadTenant();
-  } else {
-    state.view = 'login';
-    render();
+  const target = parseTarget();
+  if (!target) {
+    state.view = 'error';
+    state.msg = 'No table link found. Scan a table\'s QR code, or open this page with ?cafe=slug&table=CODE for testing.';
+    return render();
   }
+  state.target = target;
+
+  const { data: { session } } = await sb.auth.getSession();
+
+  const { data, error } = await sb.rpc('resolve_table_link', {
+    p_cafe_slug: target.cafeSlug, p_table_code: target.tableCode
+  });
+  if (error || !data) {
+    state.view = 'error';
+    state.msg = 'This table link looks invalid. Please ask staff for help.';
+    return render();
+  }
+  state.data = data;
+  state.view = 'menu';
+
+  if (session) await refreshLoyalty();
+
+  // If we're returning here from a payment gateway redirect, skip the menu
+  // and jump straight to live order tracking for that order.
+  const urlParams = new URLSearchParams(window.location.search);
+  const paidOrderId = urlParams.get('paid_order');
+  if (paidOrderId) {
+    startOrderTracking(paidOrderId);
+    return;
+  }
+
+  render();
 }
 boot();
 
-sb.auth.onAuthStateChange((event) => {
-  if (event === 'SIGNED_OUT') {
-    state = { ...state, user: null, tenant: null, view: 'login' };
-    render();
-  }
-});
-
-async function loadTenant() {
-  const { data, error } = await sb.from('tenants').select('*').eq('owner_user_id', state.user.id).maybeSingle();
-  if (error) console.error(error);
-  if (data) {
-    state.tenant = data;
-    state.role = 'owner';
-    state.view = 'home';
-    await loadAll();
-    subscribeOrders();
-    render();
-    return;
-  }
-
-  // Not an owner — check staff/kitchen membership
-  const { data: memberships } = await sb.rpc('my_staff_membership');
-  if (memberships && memberships.length > 0) {
-    const m = memberships[0];
-    const { data: tenantRow } = await sb.from('tenants').select('*').eq('id', m.tenant_id).maybeSingle();
-    state.tenant = tenantRow;
-    state.role = m.role;
-    if (m.role === 'kitchen') {
-      state.view = 'kitchen';
-      await loadOrders();
-      subscribeOrdersForKitchen();
-    } else {
-      state.view = 'home';
-      await loadAll();
-      subscribeOrders();
-    }
-    render();
-    return;
-  }
-
-  state.view = 'wizard';
-  state.step = 1;
-  render();
-}
-
-async function loadAll() {
-  await Promise.all([loadMenu(), loadTables(), loadLoyalty(), loadOrders(), loadMyTickets()]);
-}
-
-async function loadMenu() {
-  const tid = state.tenant.id;
-  const [{ data: cats }, { data: items }, { data: groups }, { data: options }] = await Promise.all([
-    sb.from('menu_categories').select('*').eq('tenant_id', tid).order('sort_order'),
-    sb.from('menu_items').select('*').eq('tenant_id', tid).order('sort_order'),
-    sb.from('menu_item_variant_groups').select('*').eq('tenant_id', tid).order('sort_order'),
-    sb.from('menu_item_variant_options').select('*').eq('tenant_id', tid).order('sort_order'),
-  ]);
-  state.categories = cats || [];
-  state.items = items || [];
-  state.variantGroups = groups || [];
-  state.variantOptions = options || [];
-}
-
-async function loadTables() {
-  const { data } = await sb.from('tables').select('*').eq('tenant_id', state.tenant.id).order('table_code');
-  state.tables = data || [];
-}
-
-async function loadLoyalty() {
-  const { data } = await sb.from('loyalty_programs').select('*').eq('tenant_id', state.tenant.id).maybeSingle();
+async function refreshLoyalty() {
+  const { data } = await sb.rpc('get_loyalty_status', { p_cafe_slug: state.target.cafeSlug });
   state.loyalty = data;
 }
 
-async function loadOrders() {
-  const { data } = await sb.from('orders').select('*').eq('tenant_id', state.tenant.id).order('created_at', { ascending: false }).limit(30);
-  state.orders = data || [];
+// ---------- Cart helpers ----------
+function priceForOptions(item, groupSelections) {
+  let total = item.base_price;
+  for (const g of item.variant_groups) {
+    for (const optId of (groupSelections[g.id] || [])) {
+      const opt = g.options.find(o => o.id === optId);
+      if (opt) total += Number(opt.price_delta);
+    }
+  }
+  return total;
+}
+function variantsSummary(item, groupSelections) {
+  const parts = [];
+  for (const g of item.variant_groups) {
+    for (const optId of (groupSelections[g.id] || [])) {
+      const opt = g.options.find(o => o.id === optId);
+      if (opt) parts.push(opt.name);
+    }
+  }
+  return parts.join(', ');
+}
+function cartTotal() {
+  return state.cart.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
+}
+function cartCount() {
+  return state.cart.reduce((sum, line) => sum + line.quantity, 0);
+}
 
-  if (state.orders.length > 0) {
-    const orderIds = state.orders.map(o => o.id);
-    const { data: items } = await sb.from('order_items').select('*').in('order_id', orderIds);
-    state.orderItems = items || [];
+// ---------- Item picker sheet ----------
+function openItemPicker(item) {
+  if (item.sold_out) return;
+  state.activeItem = item;
+  state.pickerSelections = {};
+  item.variant_groups.forEach(g => {
+    if (g.selection_type === 'single' && g.required && g.options.length) {
+      state.pickerSelections[g.id] = [g.options.find(o => !o.sold_out)?.id].filter(Boolean);
+    } else {
+      state.pickerSelections[g.id] = [];
+    }
+  });
+  state.pickerQty = 1;
+  render();
+}
+function closeItemPicker() { state.activeItem = null; render(); }
+
+function selectOption(groupId, optionId, selectionType, maxSelect) {
+  const current = state.pickerSelections[groupId] || [];
+  if (selectionType === 'single') {
+    state.pickerSelections[groupId] = [optionId];
   } else {
-    state.orderItems = [];
+    if (current.includes(optionId)) {
+      state.pickerSelections[groupId] = current.filter(id => id !== optionId);
+    } else {
+      if (maxSelect && current.length >= maxSelect) return;
+      state.pickerSelections[groupId] = [...current, optionId];
+    }
   }
+  render();
 }
-
-function subscribeOrders() {
-  sb.channel('orders-' + state.tenant.id)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `tenant_id=eq.${state.tenant.id}` }, () => {
-      loadOrders().then(render);
-    })
-    .subscribe();
+function changeQty(delta) {
+  state.pickerQty = Math.max(1, state.pickerQty + delta);
+  render();
 }
-
-// ---------- Kitchen: sound + notification alert on NEW orders only ----------
-// Browsers block audio from playing unless it's tied to a real user tap/click —
-// a fresh AudioContext created inside an async Realtime callback (no gesture
-// attached) gets silently blocked, even though the code runs without error.
-// Fix: create ONE AudioContext up front, unlocked by a real tap, then reuse
-// it for every subsequent alert (including ones triggered by Realtime events).
-let alertAudioCtx = null;
-let audioUnlocked = false;
-
-function unlockAudioAlerts() {
-  if (!alertAudioCtx) {
-    alertAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function pickerIsValid(item) {
+  for (const g of item.variant_groups) {
+    if (g.required && (state.pickerSelections[g.id] || []).length === 0) return false;
   }
-  if (alertAudioCtx.state === 'suspended') {
-    alertAudioCtx.resume();
-  }
-  audioUnlocked = true;
-  requestNotificationPermission();
-  playAlertSound(); // immediate confirmation beep so staff know it worked
+  return true;
+}
+function addToCart() {
+  const item = state.activeItem;
+  if (!pickerIsValid(item)) return;
+  const unitPrice = priceForOptions(item, state.pickerSelections);
+  state.cart.push({
+    lineKey: Math.random().toString(36).slice(2),
+    item,
+    quantity: state.pickerQty,
+    selectedOptions: JSON.parse(JSON.stringify(state.pickerSelections)),
+    unitPrice,
+    variantsLabel: variantsSummary(item, state.pickerSelections)
+  });
+  state.activeItem = null;
+  render();
+}
+function removeCartLine(lineKey) {
+  state.cart = state.cart.filter(l => l.lineKey !== lineKey);
   render();
 }
 
-function playAlertSound() {
-  if (!alertAudioCtx) return; // not unlocked yet — nothing we can do until a tap happens
-  try {
-    if (alertAudioCtx.state === 'suspended') alertAudioCtx.resume();
-    const now = alertAudioCtx.currentTime;
-    [0, 0.18].forEach((offset, i) => {
-      const osc = alertAudioCtx.createOscillator();
-      const gain = alertAudioCtx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(i === 0 ? 880 : 1046.5, now + offset);
-      gain.gain.setValueAtTime(0.0001, now + offset);
-      gain.gain.exponentialRampToValueAtTime(0.35, now + offset + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.32);
-      osc.connect(gain).connect(alertAudioCtx.destination);
-      osc.start(now + offset);
-      osc.stop(now + offset + 0.35);
-    });
-  } catch (e) { console.warn('Could not play alert sound', e); }
+// ---------- Phone / OTP loyalty sign-in ----------
+function openSignIn() { state.otpStage = 'enter-phone'; state.msg = null; render(); }
+function closeSignIn() { state.otpStage = null; render(); }
+async function sendOtp() {
+  const phone = document.getElementById('phone-input').value.trim();
+  if (!phone.startsWith('+')) return showInlineMsg('Include your country code, e.g. +20…');
+  state.phone = phone;
+  const { error } = await sb.auth.signInWithOtp({ phone });
+  if (error) return showInlineMsg(error.message);
+  state.otpStage = 'enter-code';
+  render();
+}
+async function verifyOtp() {
+  const code = document.getElementById('otp-input').value.trim();
+  const { error } = await sb.auth.verifyOtp({ phone: state.phone, token: code, type: 'sms' });
+  if (error) return showInlineMsg(error.message);
+  state.otpStage = 'enter-name';
+  render();
+}
+async function saveNameAndFinish() {
+  const name = document.getElementById('name-input').value.trim();
+  if (name) await sb.rpc('update_my_customer_name', { p_name: name });
+  state.otpStage = null;
+  await refreshLoyalty();
+  render();
+}
+function skipNameStep() {
+  state.otpStage = null;
+  refreshLoyalty().then(render);
+}
+function showInlineMsg(text) {
+  state.msg = text;
+  render();
+}
+async function signOut() {
+  await sb.auth.signOut();
+  state.loyalty = null;
+  render();
 }
 
-function requestNotificationPermission() {
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission();
+// ---------- Place order ----------
+async function placeOrder() {
+  const items = state.cart.map(l => ({
+    item_id: l.item.id,
+    quantity: l.quantity,
+    option_ids: Object.values(l.selectedOptions).flat()
+  }));
+  const { data, error } = await sb.rpc('place_order', {
+    p_cafe_slug: state.target.cafeSlug,
+    p_table_code: state.target.tableCode,
+    p_items: items,
+    p_notes: null
+  });
+  if (error || data.error) {
+    showInlineMsg((data && data.error) || (error && error.message) || 'Could not place order.');
+    return;
   }
-}
+  state.lastOrder = data;
+  state.cart = [];
+  state.showCartSheet = false;
+  if (state.loyalty && state.loyalty.signed_in) await refreshLoyalty();
 
-function showNewOrderNotification(order) {
-  if ('Notification' in window && Notification.permission === 'granted') {
-    const n = new Notification('New order received', {
-      body: `Table order · ${money(order.total || 0)} EGP`,
-      tag: order.id
-    });
-    setTimeout(() => n.close(), 8000);
+  // If this café has a real payment gateway connected, initiate payment.
+  // Redirect-based providers (Paymob/Kashier/PayTabs) send the customer to
+  // a hosted checkout page. Fawry is different — it returns a reference
+  // number for cash payment at a physical location, shown on-screen instead.
+  const gatewayStatus = state.data.tenant.payment_gateway_status;
+  const gatewayProvider = state.data.tenant.payment_gateway_provider;
+  if (gatewayStatus === 'configured' && gatewayProvider) {
+    // Same table page, plus a marker so we know to jump straight to order
+    // tracking when the customer is sent back here after paying.
+    const returnUrl = `${window.location.origin}${window.location.pathname}?paid_order=${data.order_id}`;
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/${gatewayProvider}-create-payment`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_id: data.order_id, redirect_url: returnUrl })
+      });
+      const paymentData = await res.json();
+      if (paymentData.checkout_url) {
+        window.location.href = paymentData.checkout_url;
+        return;
+      }
+      if (paymentData.reference_number) {
+        state.lastOrder.fawryReference = paymentData.reference_number;
+      }
+      if (paymentData.error) {
+        console.error('Payment initiation failed:', paymentData.error);
+      }
+    } catch (e) { console.error('Payment initiation request failed:', e); }
   }
+
+  state.view = 'confirmation';
+  render();
 }
 
-function subscribeOrdersForKitchen() {
-  sb.channel('kitchen-orders-' + state.tenant.id)
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders', filter: `tenant_id=eq.${state.tenant.id}` }, (payload) => {
-      playAlertSound();
-      showNewOrderNotification(payload.new);
-      loadOrders().then(render);
-    })
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `tenant_id=eq.${state.tenant.id}` }, () => {
-      loadOrders().then(render);
-    })
-    .subscribe();
+// ============================================================
+// RENDER
+// ============================================================
+function render() {
+  // Sheets (item picker / cart / OTP) are appended to document.body, outside
+  // #app-root, so clearing root.innerHTML alone doesn't remove them. Without
+  // this, a new overlay stacks on top of old ones instead of replacing them —
+  // which is what made the picker appear "stuck" and never close.
+  document.querySelectorAll('.overlay').forEach(el => el.remove());
+
+  if (state.view === 'error') return renderError();
+  if (state.view === 'confirmation') return renderConfirmation();
+  if (state.view === 'tracking') return renderTracking();
+  if (state.view === 'loading') { renderSkeleton(); return; }
+  renderMenu();
 }
 
-// ---------- Auth ----------
-async function handleLogin(email, password) {
-  const { error } = await sb.auth.signInWithPassword({ email, password });
-  if (error) return showMsg('login-msg', error.message, 'error');
-  const { data: { session } } = await sb.auth.getSession();
-  state.user = session.user;
-  await loadTenant();
-}
-async function handleSignup(email, password, cafeName) {
-  const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: `https://${PLATFORM_DOMAIN}/console.html` } });
-  if (error) return showMsg('login-msg', error.message, 'error');
-  if (!data.session) return showMsg('login-msg', 'Check your email to confirm your account, then sign in.', 'ok');
-  state.user = data.session.user;
-  if (cafeName) {
-    await createTenant(cafeName, '');
-    await sb.rpc('accept_terms', { p_tenant_id: state.tenant.id });
-    state.view = 'plan-selection';
-    render();
-  } else {
-    await loadTenant();
-  }
+function renderError() {
+  root.innerHTML = `<div class="center-screen"><div><p style="font-size:16px">${escapeHtml(state.msg)}</p></div></div>`;
 }
 
-function renderPlanSelection() {
-  topbarRight.innerHTML = `<span class="userline">${state.user.email}</span><button class="btn" onclick="handleLogout()">Sign out</button>`;
+function renderConfirmation() {
+  const o = state.lastOrder;
   root.innerHTML = `
-    <div class="ticket">
-      <div class="eyebrow">Almost there</div>
-      <h1>Choose how you'd like to pay</h1>
-      <p class="lead">Building your menu, tables, and everything in this dashboard is always free. This only applies once you start taking real orders from customers.</p>
-      <div class="grid2">
-        <div class="category-block">
-          <h3 style="font-size:18px">Pay-as-you-go</h3>
-          <div style="font-size:28px;font-weight:bold;margin:8px 0">0.8%<span style="font-size:14px;font-weight:normal;color:var(--ink-soft)"> per order</span></div>
-          <p class="small">No monthly fee. Best if you're just getting started or have lower order volume.</p>
-          <button class="btn btn-solid" style="width:100%;margin-top:14px" onclick="choosePlan('payg')">Choose Pay-as-you-go</button>
+    <div class="center-screen">
+      <div style="max-width:400px">
+        <div style="font-size:40px;margin-bottom:10px">✓</div>
+        <h2 style="border:none;color:var(--ink);font-size:20px">Order sent!</h2>
+        <p style="color:var(--ink-soft)">Your order has been sent to the kitchen. It'll be brought to your table.</p>
+        <div style="background:#fff;border-radius:10px;padding:16px;margin:18px 0;text-align:left;border:1px solid var(--line)">
+          ${o.reward_applied ? `<div class="cart-total-row reward-row"><span>Reward applied</span><span>-${money(o.reward_discount)} EGP</span></div>` : ''}
+          <div class="cart-total-row grand"><span>Total</span><span>${money(o.total)} EGP</span></div>
         </div>
-        <div class="category-block" style="border-color:var(--gold)">
-          <h3 style="font-size:18px">Pro</h3>
-          <div style="font-size:28px;font-weight:bold;margin:8px 0">800 EGP<span style="font-size:14px;font-weight:normal;color:var(--ink-soft)">/month</span></div>
-          <p class="small">0% per order — keep 100% of every sale. Best once you're doing steady volume.</p>
-          <button class="btn btn-solid" style="width:100%;margin-top:14px" onclick="choosePlan('pro')">Choose Pro</button>
-        </div>
+        ${o.fawryReference ? `
+          <div class="msg" style="background:rgba(192,138,46,0.12);color:var(--gold);border:1px solid var(--gold);text-align:center;padding:16px;margin-bottom:16px">
+            <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Pay with cash at any Fawry location</div>
+            <div style="font-size:24px;font-weight:bold;letter-spacing:0.05em">${escapeHtml(o.fawryReference)}</div>
+            <div style="font-size:12px;margin-top:6px">Show this reference number at any Fawry point nationwide</div>
+          </div>
+        ` : ''}
+        ${o.estimated_prep_time ? `<p style="color:var(--ink-soft);font-size:13px">Estimated prep time: ~${o.estimated_prep_time} min</p>` : ''}
+        <button class="btn btn-solid" onclick="startOrderTracking('${o.order_id}')" style="margin-bottom:10px">Track my order</button>
+        <button class="btn btn-ghost" onclick="startNewOrder()">Order something else</button>
       </div>
-      <p class="small" style="margin-top:16px;text-align:center">You can switch plans anytime from Settings.</p>
+    </div>
+  `;
+}
+function startNewOrder() { state.view = 'menu'; render(); }
+
+// ---------- Order status tracking (polls every 5s, matching native app behavior) ----------
+let trackingInterval = null;
+function startOrderTracking(orderId) {
+  state.view = 'tracking';
+  state.trackedOrder = null;
+  render();
+  pollOrderStatus(orderId);
+  if (trackingInterval) clearInterval(trackingInterval);
+  trackingInterval = setInterval(() => pollOrderStatus(orderId), 5000);
+}
+function stopOrderTracking() {
+  if (trackingInterval) { clearInterval(trackingInterval); trackingInterval = null; }
+}
+async function pollOrderStatus(orderId) {
+  const { data, error } = await sb.rpc('get_order_status', { p_order_id: orderId });
+  if (error || !data) return;
+  state.trackedOrder = data;
+  if (state.view === 'tracking') renderTracking();
+  if (data.status === 'served' || data.status === 'cancelled') stopOrderTracking();
+}
+function backFromTracking() {
+  stopOrderTracking();
+  state.view = 'menu';
+  render();
+}
+const TRACKING_STEPS = ['pending', 'preparing', 'ready', 'served'];
+function renderTracking() {
+  const o = state.trackedOrder;
+  if (!o) { root.innerHTML = '<div class="center-screen">Loading order status…</div>'; return; }
+
+  const isCancelled = o.status === 'cancelled';
+  const currentStepIndex = TRACKING_STEPS.indexOf(o.status);
+  const statusLabels = { pending: 'Order received', preparing: 'Being prepared', ready: 'Ready for pickup', served: 'Served — enjoy!' };
+
+  root.innerHTML = `
+    <div class="wrap" style="padding-top:24px">
+      <button class="btn-ghost btn" onclick="backFromTracking()" style="margin-bottom:16px">← Back to menu</button>
+      <div class="sheet-title" style="margin-bottom:4px">Order #${o.id.slice(0,8)}</div>
+      <p class="sheet-desc">Placed ${new Date(o.created_at).toLocaleTimeString()}</p>
+
+      ${isCancelled ? `
+        <div class="msg error" style="font-size:15px;padding:16px">This order was cancelled. Please check with staff.</div>
+      ` : `
+        <div style="display:flex;justify-content:space-between;margin:24px 0 8px">
+          ${TRACKING_STEPS.map((step, i) => `
+            <div style="flex:1;text-align:center">
+              <div style="width:32px;height:32px;border-radius:50%;margin:0 auto 6px;display:flex;align-items:center;justify-content:center;
+                          background:${i <= currentStepIndex ? 'var(--gold)' : '#fff'};border:2px solid var(--gold);color:${i <= currentStepIndex ? 'var(--espresso)' : 'var(--gold)'};font-weight:bold">
+                ${i < currentStepIndex ? '✓' : i + 1}
+              </div>
+              <div style="font-size:10px;color:${i <= currentStepIndex ? 'var(--ink)' : 'var(--ink-soft)'}">${statusLabels[step]}</div>
+            </div>
+          `).join('')}
+        </div>
+        <div class="loyalty-progress-track" style="margin:8px 0 20px">
+          <div class="loyalty-progress-fill" style="width:${((currentStepIndex) / (TRACKING_STEPS.length - 1)) * 100}%"></div>
+        </div>
+      `}
+
+      <div style="background:#fff;border-radius:10px;padding:16px;border:1px solid var(--line)">
+        <div class="sheet-title" style="font-size:15px;margin-bottom:10px">Items</div>
+        ${(o.items || []).map(i => `
+          <div class="cart-line">
+            <div class="cart-line-info">
+              <div class="cart-line-name">${i.quantity}× ${escapeHtml(i.item_name)}</div>
+              ${i.selected_variants && i.selected_variants.length ? `<div class="cart-line-variants">${escapeHtml(i.selected_variants.map(v=>v.name).join(', '))}</div>` : ''}
+            </div>
+            <div class="item-price">${money(i.line_total)} EGP</div>
+          </div>
+        `).join('')}
+        ${o.reward_discount > 0 ? `<div class="cart-total-row reward-row"><span>Reward applied</span><span>-${money(o.reward_discount)} EGP</span></div>` : ''}
+        <div class="cart-total-row grand"><span>Total</span><span>${money(o.total)} EGP</span></div>
+      </div>
+      <p style="font-size:11px;color:var(--ink-soft);text-align:center;margin-top:14px">Updates automatically every few seconds</p>
     </div>
   `;
 }
 
-async function choosePlan(plan) {
-  if (plan === 'payg') {
-    await sb.rpc('set_billing_plan', { p_tenant_id: state.tenant.id, p_plan: 'payg' });
-    state.tenant.billing_plan = 'payg';
-    state.tenant.platform_fee_percent = 0.8;
-    state.view = 'wizard';
-    render();
+function renderMenu() {
+  const d = state.data;
+  const primary = d.tenant.primary_color || '#2B1D14';
+
+  let html = `
+    <div class="hero" style="background:${escapeAttr(primary)}">
+      <div class="hero-slug">${escapeHtml(d.tenant.name)}</div>
+      <div class="hero-name">Table ${escapeHtml(d.table.display_name || d.table.table_code)}</div>
+      <div class="hero-table">Menu · EGP</div>
+    </div>
+  `;
+
+  if (d.menu && d.menu.length > 1) {
+    html += `
+      <div class="category-nav">
+        ${d.menu.map((cat, i) => `<div class="category-chip ${i===0?'active':''}" onclick="scrollToCategory('cat-${i}', this)">${escapeHtml(cat.category_name)}</div>`).join('')}
+      </div>
+    `;
+  }
+
+  html += `<div class="wrap">`;
+
+  // Loyalty banner / sign-in strip
+  if (state.loyalty && state.loyalty.signed_in && state.loyalty.loyalty_enabled) {
+    const l = state.loyalty;
+    if (l.type === 'punch') {
+      const pct = Math.min(100, Math.round(((l.order_count % l.punch_threshold) / l.punch_threshold) * 100));
+      const remaining = l.punch_threshold - (l.order_count % l.punch_threshold || l.punch_threshold);
+      html += `
+        <div class="loyalty-banner">
+          <div style="flex:1">
+            <div style="font-size:13px;margin-bottom:6px">${remaining === l.punch_threshold ? 'Reward ready! Order to redeem.' : `${remaining} more item${remaining===1?'':'s'} until: ${escapeHtml(l.reward_description||'a reward')}`}</div>
+            <div class="loyalty-progress-track"><div class="loyalty-progress-fill" style="width:${pct}%"></div></div>
+          </div>
+          <div class="loyalty-text">${l.order_count % l.punch_threshold}/${l.punch_threshold}</div>
+        </div>
+      `;
+    } else if (l.type === 'points') {
+      html += `<div class="loyalty-banner"><div style="flex:1;font-size:13px">You have <strong>${money(l.points_balance)} EGP</strong> in rewards credit</div></div>`;
+    }
+  } else if (!state.loyalty || !state.loyalty.signed_in) {
+    const hasLoyalty = d.loyalty_program != null;
+    html += `
+      <div class="signin-strip">
+        <span>${hasLoyalty ? 'Sign in with your phone to track rewards' : 'Sign in to speed up checkout next time'}</span>
+        <a onclick="openSignIn()">Sign in</a>
+      </div>
+    `;
   } else {
-    await startProCheckout();
+    html += `
+      <div class="signin-strip">
+        <span>Signed in</span>
+        <a onclick="signOut()">Sign out</a>
+      </div>
+    `;
+  }
+
+  if (!d.menu || d.menu.length === 0) {
+    html += `<div class="empty">This café hasn't added any menu items yet.</div>`;
+  }
+
+  for (const [catIndex, cat] of (d.menu || []).entries()) {
+    html += `<h2 id="cat-${catIndex}">${escapeHtml(cat.category_name)}</h2>`;
+    html += `<div class="menu-grid">`;
+    for (const item of cat.items) {
+      const catIcon = categoryIcon(cat.category_name);
+      const imgTag = item.photo_url
+        ? `<img class="item-img" src="${escapeAttr(item.photo_url)}" alt="" onerror="this.outerHTML='<div class=&quot;item-img-placeholder&quot;>${catIcon}</div>'"/>`
+        : `<div class="item-img-placeholder">${catIcon}</div>`;
+      html += `
+        <div class="item ${item.sold_out ? 'sold-out' : ''}" onclick='${item.sold_out ? '' : `openItemPicker(${JSON.stringify(item).replace(/'/g, "&#39;")})`}'>
+          ${imgTag}
+          <div class="item-info">
+            <div class="item-title">${escapeHtml(item.name)}</div>
+            ${item.sold_out ? '<span class="sold-out-tag">Sold out</span>' : ''}
+            ${item.description ? `<div class="item-desc">${escapeHtml(item.description)}</div>` : ''}
+          </div>
+          <div class="item-price-row">
+            <div class="item-price">${money(item.base_price)} EGP</div>
+            ${item.sold_out ? '' : '<div class="item-add-btn">+</div>'}
+          </div>
+        </div>
+      `;
+    }
+    html += `</div>`; // .menu-grid
+  }
+
+  html += `</div>`; // .wrap
+
+  if (state.cart.length > 0) {
+    html += `
+      <div class="cart-bar">
+        <div class="cart-bar-left"><span class="cart-count-badge">${cartCount()}</span> ${money(cartTotal())} EGP</div>
+        <button class="cart-bar-btn" onclick="openCartSheet()">View cart</button>
+      </div>
+    `;
+  }
+
+  root.innerHTML = html;
+
+  if (state.activeItem) renderItemSheet();
+  if (state.showCartSheet) renderCartSheet();
+  if (state.otpStage) renderOtpSheet();
+}
+
+function renderItemSheet() {
+  const item = state.activeItem;
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) closeItemPicker(); };
+
+  let groupsHtml = '';
+  for (const g of item.variant_groups) {
+    const selections = state.pickerSelections[g.id] || [];
+    groupsHtml += `
+      <div class="group-title"><span>${escapeHtml(g.name)}</span>${g.required ? '<span class="req-tag">Required</span>' : '<span>Optional</span>'}</div>
+    `;
+    for (const opt of g.options) {
+      const selected = selections.includes(opt.id);
+      groupsHtml += `
+        <div class="option-row ${selected ? 'selected' : ''} ${opt.sold_out ? 'disabled' : ''}"
+             onclick="${opt.sold_out ? '' : `selectOption('${g.id}','${opt.id}','${g.selection_type}',${g.max_select || 'null'})`}">
+          <span class="option-name">${escapeHtml(opt.name)}${opt.sold_out ? ' (sold out)' : ''}</span>
+          <span class="option-delta">${Number(opt.price_delta) > 0 ? '+' : ''}${Number(opt.price_delta) !== 0 ? money(opt.price_delta) + ' EGP' : ''}</span>
+        </div>
+      `;
+    }
+  }
+
+  const unitPrice = priceForOptions(item, state.pickerSelections);
+  const valid = pickerIsValid(item);
+
+  overlay.innerHTML = `
+    <div class="sheet" style="position:relative">
+      <button class="btn-close" onclick="closeItemPicker()">✕</button>
+      <div class="sheet-title">${escapeHtml(item.name)}</div>
+      ${item.description ? `<div class="sheet-desc">${escapeHtml(item.description)}</div>` : ''}
+      ${groupsHtml}
+      <div class="qty-row">
+        <button class="qty-btn" onclick="changeQty(-1)">−</button>
+        <span class="qty-val">${state.pickerQty}</span>
+        <button class="qty-btn" onclick="changeQty(1)">+</button>
+      </div>
+      <button class="btn" ${valid ? '' : 'disabled'} onclick="addToCart()">
+        Add to cart · ${money(unitPrice * state.pickerQty)} EGP
+      </button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function openCartSheet() { state.showCartSheet = true; render(); }
+function closeCartSheet() { state.showCartSheet = false; render(); }
+
+function renderCartSheet() {
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) closeCartSheet(); };
+
+  const linesHtml = state.cart.map(l => `
+    <div class="cart-line">
+      <div class="cart-line-info">
+        <div class="cart-line-name">${l.quantity}× ${escapeHtml(l.item.name)}</div>
+        ${l.variantsLabel ? `<div class="cart-line-variants">${escapeHtml(l.variantsLabel)}</div>` : ''}
+      </div>
+      <div class="item-price">${money(l.unitPrice * l.quantity)} EGP</div>
+      <button class="cart-line-remove" onclick="removeCartLine('${l.lineKey}')">Remove</button>
+    </div>
+  `).join('');
+
+  // Predicts whether THIS order will cross a reward threshold, using the same
+  // crossing-a-multiple math the server actually uses — counts real item
+  // quantities in the cart, not a flat "1 per order" assumption.
+  const cartQualifyingUnits = state.cart.reduce((sum, l) => sum + l.quantity, 0);
+  const willRedeem = state.loyalty && state.loyalty.signed_in && state.loyalty.loyalty_enabled
+    && state.loyalty.type === 'punch' && state.loyalty.punch_threshold > 0
+    && Math.floor((state.loyalty.order_count + cartQualifyingUnits) / state.loyalty.punch_threshold)
+       > Math.floor(state.loyalty.order_count / state.loyalty.punch_threshold);
+
+  overlay.innerHTML = `
+    <div class="sheet" style="position:relative">
+      <button class="btn-close" onclick="closeCartSheet()">✕</button>
+      <div class="sheet-title">Your order</div>
+      ${state.cart.length === 0 ? '<div class="empty">Your cart is empty</div>' : linesHtml}
+      ${willRedeem ? `<div class="msg ok" style="margin-top:12px">🎉 This order will redeem your reward: ${escapeHtml(state.loyalty.reward_description || '')}</div>` : ''}
+      <div class="cart-total-row grand"><span>Total</span><span>${money(cartTotal())} EGP</span></div>
+      <div id="order-msg"></div>
+      <button class="btn" ${state.cart.length === 0 ? 'disabled' : ''} onclick="placeOrder()" style="margin-top:14px">
+        Send order to kitchen
+      </button>
+      <p style="font-size:11px;color:var(--ink-soft);text-align:center;margin-top:10px">${paymentFooterText()}</p>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  if (state.msg) {
+    document.getElementById('order-msg').innerHTML = `<div class="msg error">${escapeHtml(state.msg)}</div>`;
+    state.msg = null;
   }
 }
 
-async function switchToPayg() {
-  if (!confirm('Switch to Pay-as-you-go? Your Pro subscription (if active) should be cancelled separately in your Stripe billing portal to avoid being charged again.')) return;
-  await sb.rpc('set_billing_plan', { p_tenant_id: state.tenant.id, p_plan: 'payg' });
-  state.tenant.billing_plan = 'payg';
-  state.tenant.platform_fee_percent = 0.8;
-  render();
-}
+function renderOtpSheet() {
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) closeSignIn(); };
 
-async function startProCheckout() {
-  const { data: { session } } = await sb.auth.getSession();
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/stripe-subscription-checkout`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tenant_id: state.tenant.id, return_url: window.location.origin + window.location.pathname })
-  });
-  const data = await res.json();
-  if (data.error) {
-    alert('Pro plan checkout isn\'t available yet: ' + data.error + '\n\nYou can continue with Pay-as-you-go for now and switch to Pro later from Settings once it\'s set up.');
-    return;
+  if (state.otpStage === 'enter-phone') {
+    overlay.innerHTML = `
+      <div class="sheet" style="position:relative">
+        <button class="btn-close" onclick="closeSignIn()">✕</button>
+        <div class="sheet-title">Sign in with phone</div>
+        <div class="sheet-desc">We'll text you a 6-digit code. No password needed.</div>
+        <label>Phone number</label>
+        <input id="phone-input" type="tel" placeholder="+20 1XX XXX XXXX" />
+        <div id="otp-msg"></div>
+        <button class="btn" style="margin-top:16px" onclick="sendOtp()">Send code</button>
+      </div>
+    `;
+  } else if (state.otpStage === 'enter-code') {
+    overlay.innerHTML = `
+      <div class="sheet" style="position:relative">
+        <button class="btn-close" onclick="closeSignIn()">✕</button>
+        <div class="sheet-title">Enter the code</div>
+        <div class="sheet-desc">Sent to ${escapeHtml(state.phone)}</div>
+        <input id="otp-input" class="otp-input" maxlength="6" inputmode="numeric" placeholder="······" />
+        <div id="otp-msg"></div>
+        <button class="btn" style="margin-top:16px" onclick="verifyOtp()">Verify</button>
+      </div>
+    `;
+  } else if (state.otpStage === 'enter-name') {
+    overlay.innerHTML = `
+      <div class="sheet" style="position:relative">
+        <button class="btn-close" onclick="skipNameStep()">✕</button>
+        <div class="sheet-title">What should we call you?</div>
+        <div class="sheet-desc">Optional — helps the café recognize you. Skip if you'd rather not.</div>
+        <input id="name-input" placeholder="Your name" />
+        <button class="btn" style="margin-top:16px" onclick="saveNameAndFinish()">Save</button>
+        <button class="btn btn-ghost" style="margin-top:8px" onclick="skipNameStep()">Skip</button>
+      </div>
+    `;
   }
-  window.location.href = data.url;
+  document.body.appendChild(overlay);
+  if (state.msg && document.getElementById('otp-msg')) {
+    document.getElementById('otp-msg').innerHTML = `<div class="msg error">${escapeHtml(state.msg)}</div>`;
+    state.msg = null;
+  }
 }
-async function handleLogout() { await sb.auth.signOut(); }
 
-function showMsg(id, text, kind) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.textContent = text;
-  el.className = 'msg ' + kind;
-  el.classList.remove('hidden');
+// ---------- utils ----------
+function renderSkeleton() {
+  root.innerHTML = `
+    <div class="hero skeleton" style="border-bottom:none;height:96px"></div>
+    <div class="wrap">
+      <div class="skeleton skeleton-line" style="width:40%;height:16px;margin:20px auto 18px"></div>
+      <div class="menu-grid">
+        ${[1,2,3,4].map(() => `
+          <div>
+            <div class="skeleton" style="aspect-ratio:1/1;border-radius:16px"></div>
+            <div class="skeleton skeleton-line" style="width:70%;height:12px;margin-top:10px"></div>
+            <div class="skeleton skeleton-line" style="width:50%;height:26px;margin-top:8px;border-radius:10px"></div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
 }
-function slugify(s) { return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''); }
+
+function scrollToCategory(anchorId, chipEl) {
+  document.getElementById(anchorId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  document.querySelectorAll('.category-chip').forEach(c => c.classList.remove('active'));
+  chipEl.classList.add('active');
+}
+
+function categoryIcon(categoryName) {
+  const name = (categoryName || '').toLowerCase();
+  if (name.includes('hot')) return '☕';
+  if (name.includes('cold')) return '🥤';
+  if (name.includes('juice')) return '🧃';
+  if (name.includes('cake')) return '🎂';
+  if (name.includes('cookie')) return '🍪';
+  if (name.includes('dessert') || name.includes('sweet')) return '🍰';
+  if (name.includes('sandwich') || name.includes('food') || name.includes('savory')) return '🥪';
+  if (name.includes('drink') || name.includes('coffee') || name.includes('tea')) return '☕';
+  return '🍽️';
+}
+
+function paymentFooterText() {
+  const status = state.data && state.data.tenant.payment_gateway_status;
+  const provider = state.data && state.data.tenant.payment_gateway_provider;
+  if (status !== 'configured' || !provider) return "Pay at the counter when your order arrives · card/wallet payment coming soon";
+  if (provider === 'fawry') return "You'll get a reference number to pay with cash at any Fawry location";
+  const providerNames = { paymob: 'Paymob', kashier: 'Kashier', paytabs: 'PayTabs', stripe: 'Stripe' };
+  return `You'll be redirected to pay securely via ${providerNames[provider] || provider}`;
+}
+
+function money(n) { return Number(n || 0).toFixed(2); }
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
-function money(n) { return Number(n || 0).toFixed(2); }
-
-// ============================================================
-// WIZARD (first-time setup only — full editing lives in the tabs below)
-// ============================================================
-async function createTenant(name, address) {
-  const slug = slugify(name) + '-' + Math.random().toString(36).slice(2, 6);
-  const { data, error } = await sb.from('tenants').insert({
-    owner_user_id: state.user.id, slug, name, address, currency: 'EGP'
-  }).select().single();
-  if (error) return showMsg('wizard-msg', error.message, 'error');
-  state.tenant = data;
-  state.step = 2;
-  render();
-}
-async function addCategory(name) {
-  const { data, error } = await sb.from('menu_categories').insert({
-    tenant_id: state.tenant.id, name, sort_order: state.categories.length + 1
-  }).select().single();
-  if (error) return showMsg('wizard-msg', error.message, 'error');
-  state.categories.push(data);
-  render();
-}
-async function addItem(categoryId, name, price) {
-  const { data, error } = await sb.from('menu_items').insert({
-    tenant_id: state.tenant.id, category_id: categoryId, name, base_price: parseFloat(price),
-    sort_order: state.items.length + 1
-  }).select().single();
-  if (error) return showMsg('wizard-msg', error.message, 'error');
-  state.items.push(data);
-  render();
-}
-async function addTable(code, displayName) {
-  const { data, error } = await sb.from('tables').insert({
-    tenant_id: state.tenant.id, table_code: code, display_name: displayName
-  }).select().single();
-  if (error) return showMsg('wizard-msg', error.message, 'error');
-  state.tables.push(data);
-  render();
-  setTimeout(() => renderQr(data), 50);
-}
-async function saveLoyalty(active, type, threshold, rewardDesc, rewardValue) {
-  const payload = {
-    tenant_id: state.tenant.id, active, type,
-    punch_threshold: type === 'punch' ? parseInt(threshold) : null,
-    points_percent: type === 'points' ? parseFloat(threshold) : null,
-    reward_description: rewardDesc,
-    reward_value: rewardValue ? parseFloat(rewardValue) : null
-  };
-  const { data, error } = await sb.from('loyalty_programs').upsert(payload, { onConflict: 'tenant_id' }).select().single();
-  if (error) { showMsg('wizard-msg', error.message, 'error'); showMsg('loyalty-msg', error.message, 'error'); return; }
-  state.loyalty = data;
-  render();
-}
-function finishWizard() { state.view = 'home'; state.homeTab = 'menu'; render(); }
-function wizStep1() {
-  const name = document.getElementById('w-name').value.trim();
-  const address = document.getElementById('w-address').value.trim();
-  if (!name) return showMsg('wizard-msg', 'Café name is required.', 'error');
-  createTenant(name, address);
-}
-function wizAddCategory() {
-  const name = document.getElementById('w-cat-name').value.trim();
-  if (!name) return;
-  addCategory(name);
-}
-function wizAddItem(catId) {
-  const name = document.getElementById('w-item-name-' + catId).value.trim();
-  const price = document.getElementById('w-item-price-' + catId).value.trim();
-  if (!name || !price) return showMsg('wizard-msg', 'Item name and price are both required.', 'error');
-  addItem(catId, name, price);
-}
-function wizStep2() { state.step = 3; render(); }
-function wizAddTable() {
-  const code = document.getElementById('w-table-code').value.trim();
-  const name = document.getElementById('w-table-name').value.trim();
-  if (!code) return showMsg('wizard-msg', 'Table code is required.', 'error');
-  addTable(code, name);
-}
-function wizStep3() { state.step = 4; render(); }
-function wizBack() { state.step = Math.max(1, state.step - 1); render(); }
-function wizFinish() {
-  const active = document.getElementById('w-loy-active').checked;
-  const type = document.getElementById('w-loy-type').value;
-  const threshold = document.getElementById('w-loy-threshold').value;
-  const desc = document.getElementById('w-loy-desc').value;
-  const value = document.getElementById('w-loy-value').value;
-  saveLoyalty(active, type, threshold, desc, value).then(finishWizard);
-}
-
-// ============================================================
-// MENU MANAGEMENT (full CRUD, always editable)
-// ============================================================
-async function updateCategory(id, fields) {
-  const { data, error } = await sb.from('menu_categories').update(fields).eq('id', id).select().single();
-  if (error) return showMsg('menu-msg', error.message, 'error');
-  state.categories = state.categories.map(c => c.id === id ? data : c);
-  render();
-}
-async function deleteCategory(id) {
-  if (!confirm('Delete this category? Items inside it will remain but become uncategorized.')) return;
-  const { error } = await sb.from('menu_categories').delete().eq('id', id);
-  if (error) return showMsg('menu-msg', error.message, 'error');
-  state.categories = state.categories.filter(c => c.id !== id);
-  render();
-}
-async function addCategoryLive(name) {
-  if (!name.trim()) return;
-  const { data, error } = await sb.from('menu_categories').insert({
-    tenant_id: state.tenant.id, name: name.trim(), sort_order: state.categories.length + 1
-  }).select().single();
-  if (error) return showMsg('menu-msg', error.message, 'error');
-  state.categories.push(data);
-  render();
-}
-async function addItemLive(categoryId, name, price) {
-  if (!name.trim() || !price) return showMsg('menu-msg', 'Item name and price are required.', 'error');
-  const { data, error } = await sb.from('menu_items').insert({
-    tenant_id: state.tenant.id, category_id: categoryId, name: name.trim(), base_price: parseFloat(price),
-    sort_order: state.items.filter(i => i.category_id === categoryId).length + 1
-  }).select().single();
-  if (error) return showMsg('menu-msg', error.message, 'error');
-  state.items.push(data);
-  render();
-}
-async function updateItem(id, fields) {
-  const { data, error } = await sb.from('menu_items').update(fields).eq('id', id).select().single();
-  if (error) return showMsg('menu-msg', error.message, 'error');
-  state.items = state.items.map(i => i.id === id ? data : i);
-  render();
-}
-async function deleteItem(id) {
-  if (!confirm('Delete this item and all its variants?')) return;
-  const { error } = await sb.from('menu_items').delete().eq('id', id);
-  if (error) return showMsg('menu-msg', error.message, 'error');
-  state.items = state.items.filter(i => i.id !== id);
-  state.variantGroups = state.variantGroups.filter(g => g.menu_item_id !== id);
-  render();
-}
-function toggleItemDetail(id) {
-  state.expandedItemId = state.expandedItemId === id ? null : id;
-  render();
-}
-function saveItemEdits(id) {
-  const name = document.getElementById('edit-name-' + id).value.trim();
-  const desc = document.getElementById('edit-desc-' + id).value.trim();
-  const price = document.getElementById('edit-price-' + id).value;
-  const photo = document.getElementById('edit-photo-' + id).value.trim();
-  const prep = document.getElementById('edit-prep-' + id).value.trim();
-  if (!name || !price) return showMsg('menu-msg', 'Name and price are required.', 'error');
-  updateItem(id, {
-    name, description: desc || null, base_price: parseFloat(price), photo_url: photo || null,
-    prep_time_minutes: prep ? parseInt(prep) : null
-  });
-}
-function toggleSoldOut(id, current) {
-  updateItem(id, { sold_out: !current });
-}
-
-function toggleCountsTowardLoyalty(id, checked) {
-  updateItem(id, { counts_toward_loyalty: checked });
-}
-
-// ----- Variant groups -----
-async function addVariantGroup(itemId, name, selectionType, required) {
-  if (!name.trim()) return;
-  const { data, error } = await sb.from('menu_item_variant_groups').insert({
-    tenant_id: state.tenant.id, menu_item_id: itemId, name: name.trim(),
-    selection_type: selectionType, required,
-    min_select: required ? 1 : 0,
-    max_select: selectionType === 'single' ? 1 : null,
-    sort_order: state.variantGroups.filter(g => g.menu_item_id === itemId).length + 1
-  }).select().single();
-  if (error) return showMsg('menu-msg', error.message, 'error');
-  state.variantGroups.push(data);
-  render();
-}
-async function deleteVariantGroup(id) {
-  if (!confirm('Delete this variant group and all its options?')) return;
-  const { error } = await sb.from('menu_item_variant_groups').delete().eq('id', id);
-  if (error) return showMsg('menu-msg', error.message, 'error');
-  state.variantGroups = state.variantGroups.filter(g => g.id !== id);
-  state.variantOptions = state.variantOptions.filter(o => o.variant_group_id !== id);
-  render();
-}
-async function updateVariantGroupRequired(id, required) {
-  const { data, error } = await sb.from('menu_item_variant_groups').update({ required, min_select: required ? 1 : 0 }).eq('id', id).select().single();
-  if (error) return showMsg('menu-msg', error.message, 'error');
-  state.variantGroups = state.variantGroups.map(g => g.id === id ? data : g);
-  render();
-}
-
-// ----- Variant options -----
-async function addVariantOption(groupId, name, priceDelta) {
-  if (!name.trim()) return;
-  const { data, error } = await sb.from('menu_item_variant_options').insert({
-    tenant_id: state.tenant.id, variant_group_id: groupId, name: name.trim(),
-    price_delta: parseFloat(priceDelta || 0),
-    sort_order: state.variantOptions.filter(o => o.variant_group_id === groupId).length + 1
-  }).select().single();
-  if (error) return showMsg('menu-msg', error.message, 'error');
-  state.variantOptions.push(data);
-  render();
-}
-async function deleteVariantOption(id) {
-  const { error } = await sb.from('menu_item_variant_options').delete().eq('id', id);
-  if (error) return showMsg('menu-msg', error.message, 'error');
-  state.variantOptions = state.variantOptions.filter(o => o.id !== id);
-  render();
-}
-async function toggleOptionSoldOut(id, current) {
-  const { data, error } = await sb.from('menu_item_variant_options').update({ sold_out: !current }).eq('id', id).select().single();
-  if (error) return showMsg('menu-msg', error.message, 'error');
-  state.variantOptions = state.variantOptions.map(o => o.id === id ? data : o);
-  render();
-}
-
-// ----- Copy variants from another item (avoids re-typing Size/Milk on every drink) -----
-async function copyVariantsToItem(targetItemId, sourceItemId) {
-  if (!sourceItemId) return;
-  const sourceGroups = state.variantGroups.filter(g => g.menu_item_id === sourceItemId);
-  for (const g of sourceGroups) {
-    const { data: newGroup, error } = await sb.from('menu_item_variant_groups').insert({
-      tenant_id: state.tenant.id, menu_item_id: targetItemId, name: g.name,
-      selection_type: g.selection_type, required: g.required,
-      min_select: g.min_select, max_select: g.max_select,
-      sort_order: state.variantGroups.filter(x => x.menu_item_id === targetItemId).length + 1
-    }).select().single();
-    if (error) { showMsg('menu-msg', error.message, 'error'); continue; }
-    state.variantGroups.push(newGroup);
-    const sourceOptions = state.variantOptions.filter(o => o.variant_group_id === g.id);
-    for (const opt of sourceOptions) {
-      const { data: newOpt } = await sb.from('menu_item_variant_options').insert({
-        tenant_id: state.tenant.id, variant_group_id: newGroup.id, name: opt.name,
-        price_delta: opt.price_delta, sort_order: opt.sort_order
-      }).select().single();
-      if (newOpt) state.variantOptions.push(newOpt);
-    }
-  }
-  render();
-}
-
-// ============================================================
-// STORE SETTINGS
-// ============================================================
-async function saveTenantSettings(fields) {
-  const { data, error } = await sb.from('tenants').update(fields).eq('id', state.tenant.id).select().single();
-  if (error) return showMsg('settings-msg', error.message, 'error');
-  state.tenant = data;
-  showMsg('settings-msg', 'Saved.', 'ok');
-  render();
-}
-function submitSettings() {
-  saveTenantSettings({
-    name: document.getElementById('s-name').value.trim(),
-    address: document.getElementById('s-address').value.trim(),
-    primary_color: document.getElementById('s-primary-color').value.trim() || null,
-    accent_color: document.getElementById('s-accent-color').value.trim() || null,
-    logo_url: document.getElementById('s-logo-url').value.trim() || null,
-  });
-}
-
-// ============================================================
-// TABLES
-// ============================================================
-async function deleteTable(id) {
-  if (!confirm('Delete this table? Its QR code will stop working.')) return;
-  const { error } = await sb.from('tables').delete().eq('id', id);
-  if (error) return showMsg('tables-msg', error.message, 'error');
-  state.tables = state.tables.filter(t => t.id !== id);
-  render();
-}
-function addTableLive() {
-  const code = document.getElementById('t-code').value.trim();
-  const name = document.getElementById('t-name').value.trim();
-  if (!code) return showMsg('tables-msg', 'Table code is required.', 'error');
-  addTable(code, name);
-  document.getElementById('t-code').value = '';
-  document.getElementById('t-name').value = '';
-}
-
-// ============================================================
-// ORDERS
-// ============================================================
-async function updateOrderStatus(orderId, status) {
-  await sb.from('orders').update({ status }).eq('id', orderId);
-  await loadOrders();
-  render();
-}
-
-async function cancelOrder(orderId) {
-  const reason = prompt('Reason for cancelling this order (required — shows up in reports for reconciliation):');
-  if (reason === null) return; // user hit Cancel on the prompt itself
-  if (!reason.trim()) { alert('A reason is required to cancel an order.'); return; }
-  const { data, error } = await sb.rpc('cancel_order', { p_order_id: orderId, p_reason: reason.trim() });
-  if (error || (data && data.error)) {
-    alert('Could not cancel order: ' + ((data && data.error) || error.message));
-    return;
-  }
-  await loadOrders();
-  render();
-}
-
-// ============================================================
-// RENDERING
-// ============================================================
-function render() {
-  if (state.view === 'login') return renderLogin();
-  if (state.view === 'set-invite-password') return renderSetInvitePassword();
-  if (state.view === 'plan-selection') return renderPlanSelection();
-  if (state.view === 'wizard') return renderWizard();
-  if (state.view === 'home') return renderHome();
-  if (state.view === 'kitchen') return renderKitchen();
-  root.innerHTML = '<div class="center-screen">Loading…</div>';
-  topbarRight.innerHTML = '';
-}
-
-let loginTab = 'signin'; // 'signin' | 'register' | 'kitchen'
-
-function switchLoginTab(tab) {
-  loginTab = tab;
-  render();
-}
-
-function renderLogin() {
-  topbarRight.innerHTML = '';
-  root.innerHTML = `
-    <div class="center-screen">
-      <div class="ticket login-card" style="width:420px">
-        <div class="eyebrow">Café Console</div>
-        <div class="tabs" style="margin-bottom:22px">
-          <div class="tab ${loginTab==='signin'?'active':''}" onclick="switchLoginTab('signin')">Sign in</div>
-          <div class="tab ${loginTab==='register'?'active':''}" onclick="switchLoginTab('register')">Register your café</div>
-        </div>
-        <div id="login-msg" class="msg hidden"></div>
-        <div id="login-tab-body"></div>
-      </div>
-    </div>
-  `;
-  renderLoginTabBody();
-}
-
-function renderLoginTabBody() {
-  const body = document.getElementById('login-tab-body');
-  if (loginTab === 'signin') {
-    body.innerHTML = `
-      <h1>Sign in</h1>
-      <p class="lead">For café owners and invited kitchen staff.</p>
-      <label for="si-email">Email</label>
-      <input id="si-email" type="email" placeholder="owner@yourcafe.com" required />
-      <label for="si-password">Password</label>
-      <input id="si-password" type="password" placeholder="••••••••" required minlength="6" />
-      <button class="btn btn-solid" style="width:100%;margin-top:18px" onclick="doSignIn()">Sign in</button>
-    `;
-  } else if (loginTab === 'register') {
-    body.innerHTML = `
-      <h1>Register your café</h1>
-      <p class="lead">Takes about 10 minutes — you'll set up your account here, then build your menu and tables next.</p>
-      <label for="reg-name">Café name</label>
-      <input id="reg-name" placeholder="Blue Bean Café" required />
-      <label for="reg-email">Your email</label>
-      <input id="reg-email" type="email" placeholder="owner@yourcafe.com" required />
-      <label for="reg-password">Password</label>
-      <input id="reg-password" type="password" placeholder="••••••••" required minlength="6" />
-      <label for="reg-password-confirm">Confirm password</label>
-      <input id="reg-password-confirm" type="password" placeholder="••••••••" required minlength="6" />
-      <div class="checkline" style="margin-top:16px">
-        <input type="checkbox" id="reg-terms" />
-        <label for="reg-terms" style="margin:0;display:inline">I agree to the <a href="terms.html" target="_blank" style="color:var(--gold)">Terms of Service</a> and <a href="privacy.html" target="_blank" style="color:var(--gold)">Privacy Policy</a></label>
-      </div>
-      <button class="btn btn-solid" style="width:100%;margin-top:18px" onclick="doRegisterBusiness()">Create my café account</button>
-    `;
-  }
-}
-
-function doSignIn() {
-  const email = document.getElementById('si-email').value.trim();
-  const password = document.getElementById('si-password').value;
-  if (!email || !password) return showMsg('login-msg', 'Enter both email and password.', 'error');
-  handleLogin(email, password);
-}
-
-function doRegisterBusiness() {
-  const name = document.getElementById('reg-name').value.trim();
-  const email = document.getElementById('reg-email').value.trim();
-  const password = document.getElementById('reg-password').value;
-  const confirm = document.getElementById('reg-password-confirm').value;
-  const termsAccepted = document.getElementById('reg-terms').checked;
-  if (!name) return showMsg('login-msg', 'Enter your café\'s name.', 'error');
-  if (!email || !password) return showMsg('login-msg', 'Enter both email and password.', 'error');
-  if (password.length < 6) return showMsg('login-msg', 'Password must be at least 6 characters.', 'error');
-  if (password !== confirm) return showMsg('login-msg', 'Passwords don\'t match.', 'error');
-  if (!termsAccepted) return showMsg('login-msg', 'You need to accept the Terms of Service and Privacy Policy to continue.', 'error');
-  handleSignup(email, password, name);
-}
-
-// ============================================================
-// KITCHEN INVITE ACCEPTANCE — an invited staff member clicks the emailed
-// link, Supabase auto-authenticates them with a temporary session, and we
-// prompt them to set a real password before completing their join.
-// ============================================================
-async function checkForPendingInvite() {
-  const { data: { session } } = await sb.auth.getSession();
-  if (!session) return false;
-  // Supabase includes type=invite in the URL hash when this session came
-  // from an invite link (not a normal sign-in) — check both the raw hash
-  // (before Supabase's client strips it) and the user's own metadata as a
-  // fallback, since the hash may already be gone by the time this runs.
-  const cameFromInviteLink = window.location.hash.includes('type=invite');
-  const hasPendingInviteMetadata = !!(session.user.user_metadata && session.user.user_metadata.invited_tenant_id);
-  if (cameFromInviteLink || hasPendingInviteMetadata) {
-    state.user = session.user;
-    state.view = 'set-invite-password';
-    render();
-    return true;
-  }
-  return false;
-}
-
-function renderSetInvitePassword() {
-  topbarRight.innerHTML = '';
-  const tenantName = state.user.user_metadata?.invited_tenant_name || 'the café';
-  root.innerHTML = `
-    <div class="center-screen">
-      <div class="ticket login-card">
-        <div class="eyebrow">You're invited</div>
-        <h1>Join ${escapeHtml(tenantName)}'s kitchen</h1>
-        <p class="lead">Set a password to finish creating your account. You'll get a live order queue with sound alerts — nothing else.</p>
-        <div id="invite-pw-msg" class="msg hidden"></div>
-        <label for="invite-password">New password</label>
-        <input id="invite-password" type="password" placeholder="••••••••" required minlength="6"/>
-        <label for="invite-password-confirm">Confirm password</label>
-        <input id="invite-password-confirm" type="password" placeholder="••••••••" required minlength="6"/>
-        <button class="btn btn-solid" style="width:100%;margin-top:18px" onclick="completeInviteSetup()">Set password &amp; join</button>
-      </div>
-    </div>
-  `;
-}
-
-async function completeInviteSetup() {
-  const password = document.getElementById('invite-password').value;
-  const confirm = document.getElementById('invite-password-confirm').value;
-  if (!password || password.length < 6) return showMsg('invite-pw-msg', 'Password must be at least 6 characters.', 'error');
-  if (password !== confirm) return showMsg('invite-pw-msg', 'Passwords don\'t match.', 'error');
-
-  const { error: pwError } = await sb.auth.updateUser({ password });
-  if (pwError) return showMsg('invite-pw-msg', pwError.message, 'error');
-
-  const { data: joinResult, error: joinError } = await sb.rpc('accept_kitchen_invite');
-  if (joinError || (joinResult && joinResult.error)) {
-    return showMsg('invite-pw-msg', 'Password set, but joining the café failed. Please contact your café owner.', 'error');
-  }
-  // Clear the invite flag so future normal logins don't re-trigger this screen
-  await sb.auth.updateUser({ data: { invited_tenant_id: null } });
-  await loadTenant();
-}
-
-function renderWizard() {
-  topbarRight.innerHTML = `<span class="userline">${state.user.email}</span><button class="btn" onclick="handleLogout()">Sign out</button>`;
-  const s = state.step;
-  root.innerHTML = `
-    <div class="ticket">
-      <div class="stepper">${[1,2,3,4].map(n => `<div class="step-dot ${n < s ? 'done' : n === s ? 'active' : ''}"></div>`).join('')}</div>
-      <div id="wizard-msg" class="msg hidden"></div>
-      <div id="wizard-body"></div>
-    </div>
-  `;
-  const body = document.getElementById('wizard-body');
-
-  if (s === 1) {
-    body.innerHTML = `
-      <div class="eyebrow">Step 1 of 4</div>
-      <h1>Tell us about your café</h1>
-      <p class="lead">This becomes the branding customers see when they scan a table code.</p>
-      <label>Café name</label><input id="w-name" placeholder="Blue Bean Café" />
-      <label>Address</label><input id="w-address" placeholder="12 Zamalek St, Cairo" />
-      <div class="nav-actions">
-        <span class="small">Prices will be in EGP</span>
-        <button class="btn btn-solid" onclick="wizStep1()">Continue</button>
-      </div>
-    `;
-  }
-  if (s === 2) {
-    body.innerHTML = `
-      <div class="eyebrow">Step 2 of 4</div>
-      <h1>Build your menu</h1>
-      <p class="lead">Add at least one category and item. You can add sizes, milk types, and other options later from the Menu tab.</p>
-      <div class="row">
-        <div><label>New category</label><input id="w-cat-name" placeholder="Hot Drinks" /></div>
-        <div style="flex:0 0 auto;"><button class="btn" onclick="wizAddCategory()">Add category</button></div>
-      </div>
-      <div style="margin-top:18px">
-        ${state.categories.map(c => `
-          <div style="margin-bottom:14px">
-            <strong>${escapeHtml(c.name)}</strong>
-            <div class="row" style="margin-top:8px">
-              <div><input id="w-item-name-${c.id}" placeholder="Item name"/></div>
-              <div style="flex:0 0 100px"><input id="w-item-price-${c.id}" placeholder="EGP"/></div>
-              <div style="flex:0 0 auto"><button class="btn" onclick="wizAddItem('${c.id}')">Add</button></div>
-            </div>
-            ${state.items.filter(i => i.category_id === c.id).map(i => `
-              <div style="display:flex;justify-content:space-between;padding:6px 0"><span>${escapeHtml(i.name)}</span><span class="item-price">${money(i.base_price)} EGP</span></div>
-            `).join('') || '<div class="small" style="padding:6px 0">No items yet</div>'}
-          </div>
-        `).join('') || '<div class="empty">No categories yet — add one above</div>'}
-      </div>
-      <div class="nav-actions">
-        <button class="btn" onclick="wizBack()">Back</button>
-        <button class="btn btn-solid" ${state.items.length === 0 ? 'disabled' : ''} onclick="wizStep2()">Continue</button>
-      </div>
-    `;
-  }
-  if (s === 3) {
-    body.innerHTML = `
-      <div class="eyebrow">Step 3 of 4</div>
-      <h1>Set up your tables</h1>
-      <p class="lead">Each table gets its own QR code. Print it and place it on the table.</p>
-      <div class="row">
-        <div><label>Table code</label><input id="w-table-code" placeholder="A07" /></div>
-        <div><label>Display name (optional)</label><input id="w-table-name" placeholder="Patio Table 7" /></div>
-        <div style="flex:0 0 auto;"><button class="btn" onclick="wizAddTable()">Generate QR</button></div>
-      </div>
-      <div class="grid2" style="margin-top:20px" id="qr-grid">
-        ${state.tables.map(t => tableQrBlock(t, false)).join('') || '<div class="empty">No tables yet — add one above</div>'}
-      </div>
-      <div class="nav-actions">
-        <button class="btn" onclick="wizBack()">Back</button>
-        <button class="btn btn-solid" ${state.tables.length === 0 ? 'disabled' : ''} onclick="wizStep3()">Continue</button>
-      </div>
-    `;
-    state.tables.forEach(renderQr);
-  }
-  if (s === 4) {
-    const lp = state.loyalty || {};
-    body.innerHTML = `
-      <div class="eyebrow">Step 4 of 4 — optional</div>
-      <h1>Loyalty program</h1>
-      <p class="lead">Reward repeat customers automatically. You can skip this and turn it on later from the Loyalty tab.</p>
-      <div class="checkline"><input type="checkbox" id="w-loy-active" ${lp.active ? 'checked' : ''}/> Enable loyalty program</div>
-      <div class="row">
-        <div><label>Type</label>
-          <select id="w-loy-type">
-            <option value="punch" ${lp.type==='punch'?'selected':''}>Punch card (buy N qualifying drinks/items)</option>
-            <option value="points" ${lp.type==='points'?'selected':''}>Points (% cashback)</option>
-          </select>
-        </div>
-        <div><label>Threshold / %</label><input id="w-loy-threshold" placeholder="e.g. 8, or 5 for 5%" value="${lp.punch_threshold || lp.points_percent || ''}"/></div>
-      </div>
-      <label>Reward description</label><input id="w-loy-desc" placeholder="Free drink of choice" value="${lp.reward_description || ''}"/>
-      <label>Reward value (EGP, optional)</label><input id="w-loy-value" placeholder="65" value="${lp.reward_value || ''}"/>
-      <div class="nav-actions">
-        <button class="btn" onclick="wizBack()">Back</button>
-        <button class="btn btn-solid" onclick="wizFinish()">Finish setup</button>
-      </div>
-    `;
-  }
-}
-
-function tableQrBlock(t, withDelete) {
-  const url = `https://${PLATFORM_DOMAIN}/t/${state.tenant.slug}/${t.table_code}`;
-  return `
-    <div class="qr-box">
-      ${withDelete ? `<button class="icon-btn qr-delete" onclick="deleteTable('${t.id}')" title="Delete table">✕</button>` : ''}
-      <div id="qr-${t.id}"></div>
-      <div style="font-weight:bold;margin-top:6px">${escapeHtml(t.display_name || t.table_code)}</div>
-      <div class="qr-caption">${url}</div>
-    </div>
-  `;
-}
-function renderQr(t) {
-  const el = document.getElementById('qr-' + t.id);
-  if (!el || el.childElementCount > 0) return;
-  const url = `https://${PLATFORM_DOMAIN}/t/${state.tenant.slug}/${t.table_code}`;
-  new QRCode(el, { text: url, width: 140, height: 140, colorDark: '#2B1D14', colorLight: '#ffffff' });
-}
-
-function renderHome() {
-  topbarRight.innerHTML = `<span class="userline">${escapeHtml(state.tenant.name)} · ${state.user.email}</span><button class="btn" onclick="handleLogout()">Sign out</button>`;
-  const unreadCount = myTickets.filter(t => !t.tenant_read_at || (t.updated_at && new Date(t.updated_at) > new Date(t.tenant_read_at))).length;
-  root.innerHTML = `
-    <div class="tabs">
-      ${['orders','customers','menu','tables','loyalty','reports','billing','settings','support'].map(t => `
-        <div class="tab ${state.homeTab === t ? 'active' : ''}" onclick="switchTab('${t}')">${t}${t === 'support' && unreadCount > 0 ? ` <span class="pill error" style="margin-left:4px">${unreadCount}</span>` : ''}</div>
-      `).join('')}
-    </div>
-    <div id="tab-body"></div>
-  `;
-  const body = document.getElementById('tab-body');
-  if (state.homeTab === 'orders') body.innerHTML = renderOrdersTab();
-  if (state.homeTab === 'customers') { renderCustomersTab(); loadTenantCustomers(); }
-  if (state.homeTab === 'menu') body.innerHTML = renderMenuTab();
-  if (state.homeTab === 'tables') body.innerHTML = renderTablesTab();
-  if (state.homeTab === 'loyalty') body.innerHTML = renderLoyaltyTab();
-  if (state.homeTab === 'settings') { body.innerHTML = renderSettingsTab(); loadStaffList(); loadPaymentGatewayStatus(); }
-  if (state.homeTab === 'reports') renderReportsTab();
-  if (state.homeTab === 'billing') { renderBillingTab(); loadBillingSummary(); }
-  if (state.homeTab === 'support') { renderSupportTab(); markSupportRead(); }
-  if (state.homeTab === 'tables') state.tables.forEach(renderQr);
-}
-function switchTab(t) { state.homeTab = t; state.expandedItemId = null; render(); }
-
-let myTickets = [];
-async function loadMyTickets() {
-  const { data } = await sb.from('support_tickets').select('*').eq('tenant_id', state.tenant.id).order('created_at', { ascending: false });
-  myTickets = data || [];
-  if (state.homeTab === 'support') renderSupportTab();
-}
-async function markSupportRead() {
-  await sb.rpc('mark_tenant_tickets_read', { p_tenant_id: state.tenant.id });
-  await loadMyTickets();
-  render(); // refresh tab bar so the badge clears immediately
-}
-// ============================================================
-// REPORTS — shift/day/week/month/year order reports with Excel/PDF export
-// ============================================================
-let reportState = {
-  rangeLabel: 'Today',
-  start: null,
-  end: null,
-  orders: [],
-  loaded: false
-};
-
-function setReportRange(label) {
-  const now = new Date();
-  let start, end;
-  if (label === 'Today') {
-    start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    end = new Date(start); end.setDate(end.getDate() + 1);
-  } else if (label === 'Yesterday') {
-    end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    start = new Date(end); start.setDate(start.getDate() - 1);
-  } else if (label === 'This Week') {
-    const day = now.getDay();
-    start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day);
-    end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  } else if (label === 'This Month') {
-    start = new Date(now.getFullYear(), now.getMonth(), 1);
-    end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  } else if (label === 'This Year') {
-    start = new Date(now.getFullYear(), 0, 1);
-    end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  }
-  reportState.rangeLabel = label;
-  reportState.start = start;
-  reportState.end = end;
-  generateReport();
-}
-
-function toDatetimeLocalValue(d) {
-  const pad = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function applyCustomReportRange() {
-  const startVal = document.getElementById('report-start').value;
-  const endVal = document.getElementById('report-end').value;
-  if (!startVal || !endVal) return;
-  reportState.rangeLabel = 'Custom range';
-  reportState.start = new Date(startVal);
-  reportState.end = new Date(endVal);
-  generateReport();
-}
-
-async function generateReport() {
-  reportState.loaded = false;
-  renderReportsTab();
-  const { data: orders } = await sb.from('orders').select('*')
-    .eq('tenant_id', state.tenant.id)
-    .gte('created_at', reportState.start.toISOString())
-    .lt('created_at', reportState.end.toISOString())
-    .order('created_at');
-  const orderIds = (orders || []).map(o => o.id);
-  let items = [];
-  if (orderIds.length > 0) {
-    const { data: itemRows } = await sb.from('order_items').select('*').in('order_id', orderIds);
-    items = itemRows || [];
-  }
-  reportState.orders = (orders || []).map(o => ({ ...o, items: items.filter(i => i.order_id === o.id) }));
-  reportState.loaded = true;
-  renderReportsTab();
-}
-
-function computeReportStats(orders) {
-  const validOrders = orders.filter(o => o.status !== 'cancelled');
-  const grossSales = validOrders.reduce((s, o) => s + Number(o.subtotal || 0), 0);
-  const totalDiscounts = validOrders.reduce((s, o) => s + Number(o.reward_discount || 0), 0);
-  const netSales = validOrders.reduce((s, o) => s + Number(o.total || 0), 0);
-  const orderCount = validOrders.length;
-  const avgOrderValue = orderCount ? netSales / orderCount : 0;
-  const cancelledCount = orders.length - validOrders.length;
-  const rewardOrders = validOrders.filter(o => Number(o.reward_discount || 0) > 0).length;
-  const feePercent = Number(state.tenant.platform_fee_percent || 0);
-  const platformFee = grossSales * feePercent / 100;
-  const netAfterPlatformFee = netSales - platformFee;
-
-  const statusCounts = {};
-  orders.forEach(o => { statusCounts[o.status] = (statusCounts[o.status] || 0) + 1; });
-
-  const itemMap = {};
-  validOrders.forEach(o => o.items.forEach(i => {
-    if (!itemMap[i.item_name]) itemMap[i.item_name] = { name: i.item_name, qty: 0, revenue: 0 };
-    itemMap[i.item_name].qty += i.quantity;
-    itemMap[i.item_name].revenue += Number(i.line_total || 0);
-  }));
-  const itemBreakdown = Object.values(itemMap).sort((a, b) => b.revenue - a.revenue);
-
-  const hourMap = {};
-  validOrders.forEach(o => {
-    const h = new Date(o.created_at).getHours();
-    hourMap[h] = (hourMap[h] || 0) + 1;
-  });
-
-  return { grossSales, totalDiscounts, netSales, orderCount, avgOrderValue, cancelledCount, rewardOrders, statusCounts, itemBreakdown, hourMap, feePercent, platformFee, netAfterPlatformFee };
-}
-
-// ============================================================
-// CUSTOMERS — this café's own customer directory (name/phone, order
-// history AT THIS CAFÉ only, loyalty progress). Never shows a customer's
-// activity at other cafés, even though the underlying identity is shared
-// platform-wide via phone verification.
-// ============================================================
-let tenantCustomers = [];
-async function loadTenantCustomers() {
-  const { data } = await sb.rpc('get_tenant_customers', { p_tenant_id: state.tenant.id });
-  tenantCustomers = data || [];
-  if (state.homeTab === 'customers') renderCustomersTab();
-}
-function renderCustomersTab() {
-  const body = document.getElementById('tab-body');
-  if (!body) return;
-  body.innerHTML = `
-    <div class="ticket">
-      <h2>Customers (${tenantCustomers.length})</h2>
-      <p class="lead">Everyone who has signed in with their phone and ordered from you — names are optional, so some may only show a phone number.</p>
-      ${tenantCustomers.length === 0 ? '<div class="empty">No signed-in customers yet. Guest orders (no phone sign-in) aren\'t tracked here.</div>' : `
-        <table>
-          <thead><tr><th>Customer</th><th>Orders here</th><th>Spent here</th><th>Loyalty</th><th>Last order</th></tr></thead>
-          <tbody>
-            ${tenantCustomers.map(c => `
-              <tr>
-                <td><strong>${escapeHtml(c.display_name || 'No name given')}</strong><br><span class="small">${escapeHtml(c.phone_number)}</span></td>
-                <td>${c.order_count_here}</td>
-                <td>${money(c.total_spent_here)} EGP</td>
-                <td>${c.loyalty_progress != null ? `<span class="pill warn">${c.loyalty_progress} items</span>` : '<span class="small">—</span>'}</td>
-                <td style="font-family:var(--mono);font-size:11px">${new Date(c.last_order_at).toLocaleDateString()}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      `}
-    </div>
-  `;
-}
-
-function renderReportsTab() {
-  const body = document.getElementById('tab-body');
-  if (!body) return;
-  if (!reportState.start) { setReportRange('Today'); return; }
-
-  const stats = reportState.loaded ? computeReportStats(reportState.orders) : null;
-
-  body.innerHTML = `
-    <div class="ticket">
-      <h2>Generate report</h2>
-      <div class="row" style="flex-wrap:wrap;gap:8px">
-        ${['Today','Yesterday','This Week','This Month','This Year'].map(l => `
-          <button class="btn btn-sm ${reportState.rangeLabel===l?'btn-solid':''}" onclick="setReportRange('${l}')">${l}</button>
-        `).join('')}
-      </div>
-      <hr class="divider"/>
-      <p class="small">Or set a custom range — useful for a single shift (e.g. 6:00 AM–2:00 PM):</p>
-      <div class="row">
-        <div><label>From</label><input id="report-start" type="datetime-local" value="${reportState.start ? toDatetimeLocalValue(reportState.start) : ''}"/></div>
-        <div><label>To</label><input id="report-end" type="datetime-local" value="${reportState.end ? toDatetimeLocalValue(reportState.end) : ''}"/></div>
-        <div style="flex:0 0 auto"><button class="btn btn-sm" style="margin-top:14px" onclick="applyCustomReportRange()">Apply</button></div>
-      </div>
-    </div>
-
-    ${!reportState.loaded ? '<div class="ticket"><div class="empty">Generating report…</div></div>' : `
-      <div class="ticket">
-        <h2>${escapeHtml(reportState.rangeLabel)} — ${reportState.start.toLocaleString()} to ${reportState.end.toLocaleString()}</h2>
-        <div class="grid2" style="grid-template-columns:repeat(4,1fr);gap:12px">
-          <div class="qr-box" style="padding:12px"><div style="font-size:22px;font-weight:bold">${money(stats.grossSales)}</div><div class="small">Gross sales (EGP)</div></div>
-          <div class="qr-box" style="padding:12px"><div style="font-size:22px;font-weight:bold;color:var(--ok)">${money(stats.totalDiscounts)}</div><div class="small">Loyalty discounts given</div></div>
-          <div class="qr-box" style="padding:12px"><div style="font-size:22px;font-weight:bold">${money(stats.netSales)}</div><div class="small">Net sales / to reconcile (EGP)</div></div>
-          <div class="qr-box" style="padding:12px"><div style="font-size:22px;font-weight:bold">${stats.orderCount}</div><div class="small">Orders</div></div>
-          <div class="qr-box" style="padding:12px;border-color:var(--gold)"><div style="font-size:22px;font-weight:bold;color:var(--gold)">${money(stats.platformFee)}</div><div class="small">Tabl0 platform fee (${stats.feePercent}%, EGP)</div></div>
-          <div class="qr-box" style="padding:12px;border-color:var(--gold)"><div style="font-size:22px;font-weight:bold">${money(stats.netAfterPlatformFee)}</div><div class="small">Net after platform fee — your take-home (EGP)</div></div>
-          <div class="qr-box" style="padding:12px"><div style="font-size:22px;font-weight:bold">${money(stats.avgOrderValue)}</div><div class="small">Avg order value (EGP)</div></div>
-          <div class="qr-box" style="padding:12px"><div style="font-size:22px;font-weight:bold;color:var(--error)">${stats.cancelledCount}</div><div class="small">Cancelled orders</div></div>
-        </div>
-        <p class="small" style="margin-top:10px">"Net sales / to reconcile" is what customers actually paid — match this against your till. "Net after platform fee" subtracts Tabl0's cut on top, for your own profit picture.</p>
-        <div class="nav-actions" style="margin-top:8px">
-          <span class="small">${reportState.orders.length} order${reportState.orders.length===1?'':'s'} in range</span>
-          <div>
-            <button class="btn btn-sm" onclick="exportReportExcel()">📊 Export Excel</button>
-            <button class="btn btn-sm" onclick="exportReportPdf()">📄 Export PDF</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="ticket">
-        <h2>Sales by item</h2>
-        ${stats.itemBreakdown.length === 0 ? '<div class="empty">No items sold in this range.</div>' : `
-          <table style="width:100%;border-collapse:collapse">
-            <thead><tr><th style="text-align:left;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Item</th><th style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Qty sold</th><th style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Revenue</th></tr></thead>
-            <tbody>
-              ${stats.itemBreakdown.map(i => `<tr><td style="padding:6px;border-bottom:1px dashed var(--line)">${escapeHtml(i.name)}</td><td style="text-align:right;padding:6px;border-bottom:1px dashed var(--line)">${i.qty}</td><td style="text-align:right;padding:6px;border-bottom:1px dashed var(--line)">${money(i.revenue)} EGP</td></tr>`).join('')}
-            </tbody>
-          </table>
-        `}
-      </div>
-
-      ${stats.cancelledCount > 0 ? `
-      <div class="ticket">
-        <h2>Cancelled orders (${stats.cancelledCount})</h2>
-        <p class="small" style="margin-bottom:10px">Every cancellation requires a reason — review these against your own records to catch any discrepancy.</p>
-        <table style="width:100%;border-collapse:collapse">
-          <thead><tr><th style="text-align:left;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Order</th><th style="text-align:left;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Time</th><th style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Would-be total</th><th style="text-align:left;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:6px">Reason</th></tr></thead>
-          <tbody>
-            ${reportState.orders.filter(o => o.status === 'cancelled').map(o => `
-              <tr><td style="padding:6px;border-bottom:1px dashed var(--line);font-family:var(--mono);font-size:12px">#${o.id.slice(0,8)}</td>
-                  <td style="padding:6px;border-bottom:1px dashed var(--line);font-family:var(--mono);font-size:12px">${new Date(o.created_at).toLocaleString()}</td>
-                  <td style="text-align:right;padding:6px;border-bottom:1px dashed var(--line)">${money(o.total)} EGP</td>
-                  <td style="padding:6px;border-bottom:1px dashed var(--line)">${escapeHtml(o.cancellation_reason || '—')}</td></tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>` : ''}
-    `}
-  `;
-}
-
-function exportReportExcel() {
-  const stats = computeReportStats(reportState.orders);
-  const wb = XLSX.utils.book_new();
-
-  const summaryData = [
-    ['Tabl0 Order Report'],
-    ['Café', state.tenant.name],
-    ['Range', reportState.rangeLabel],
-    ['From', reportState.start.toLocaleString()],
-    ['To', reportState.end.toLocaleString()],
-    ['Generated', new Date().toLocaleString()],
-    [],
-    ['Gross Sales (EGP)', stats.grossSales.toFixed(2)],
-    ['Loyalty Discounts Given (EGP)', stats.totalDiscounts.toFixed(2)],
-    ['Net Sales / To Reconcile (EGP)', stats.netSales.toFixed(2)],
-    ['Tabl0 Platform Fee (' + stats.feePercent + '%, EGP)', stats.platformFee.toFixed(2)],
-    ['Net After Platform Fee — Take-Home (EGP)', stats.netAfterPlatformFee.toFixed(2)],
-    ['Order Count', stats.orderCount],
-    ['Average Order Value (EGP)', stats.avgOrderValue.toFixed(2)],
-    ['Orders With Reward Redeemed', stats.rewardOrders],
-    ['Cancelled Orders', stats.cancelledCount],
-  ];
-  const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
-  XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
-
-  const itemRows = [['Item', 'Quantity Sold', 'Revenue (EGP)']];
-  stats.itemBreakdown.forEach(i => itemRows.push([i.name, i.qty, i.revenue.toFixed(2)]));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(itemRows), 'Sales by Item');
-
-  const orderRows = [['Order ID', 'Date/Time', 'Table', 'Status', 'Payment Status', 'Items', 'Subtotal', 'Discount', 'Total', 'Cancellation Reason', 'Notes']];
-  reportState.orders.forEach(o => {
-    const itemsSummary = o.items.map(i => `${i.quantity}x ${i.item_name}`).join('; ');
-    orderRows.push([
-      o.id, new Date(o.created_at).toLocaleString(), o.table_id ? o.table_id.slice(0,8) : '',
-      o.status, o.payment_status, itemsSummary,
-      Number(o.subtotal || 0).toFixed(2), Number(o.reward_discount || 0).toFixed(2), Number(o.total || 0).toFixed(2),
-      o.cancellation_reason || '', o.notes || ''
-    ]);
-  });
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(orderRows), 'Order Detail');
-
-  const cancelledOrders = reportState.orders.filter(o => o.status === 'cancelled');
-  if (cancelledOrders.length > 0) {
-    const cancelRows = [['Order ID', 'Date/Time', 'Would-be Total', 'Reason']];
-    cancelledOrders.forEach(o => cancelRows.push([o.id, new Date(o.created_at).toLocaleString(), Number(o.total||0).toFixed(2), o.cancellation_reason || '']));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cancelRows), 'Cancelled Orders');
-  }
-
-  const filename = `Tabl0_Report_${state.tenant.slug}_${reportState.rangeLabel.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`;
-  XLSX.writeFile(wb, filename);
-}
-
-function exportReportPdf() {
-  const stats = computeReportStats(reportState.orders);
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-
-  doc.setFontSize(16);
-  doc.text('Tabl0 Order Report', 14, 18);
-  doc.setFontSize(10);
-  doc.text(`Café: ${state.tenant.name}`, 14, 26);
-  doc.text(`Range: ${reportState.rangeLabel} (${reportState.start.toLocaleString()} – ${reportState.end.toLocaleString()})`, 14, 32);
-  doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 38);
-
-  doc.autoTable({
-    startY: 46,
-    head: [['Metric', 'Value']],
-    body: [
-      ['Gross sales', money(stats.grossSales) + ' EGP'],
-      ['Loyalty discounts given', money(stats.totalDiscounts) + ' EGP'],
-      ['Net sales / to reconcile', money(stats.netSales) + ' EGP'],
-      ['Tabl0 platform fee (' + stats.feePercent + '%)', money(stats.platformFee) + ' EGP'],
-      ['Net after platform fee (take-home)', money(stats.netAfterPlatformFee) + ' EGP'],
-      ['Order count', String(stats.orderCount)],
-      ['Average order value', money(stats.avgOrderValue) + ' EGP'],
-      ['Orders with reward redeemed', String(stats.rewardOrders)],
-      ['Cancelled orders', String(stats.cancelledCount)],
-    ],
-    theme: 'grid', headStyles: { fillColor: [43, 29, 20] }
-  });
-
-  doc.autoTable({
-    startY: doc.lastAutoTable.finalY + 10,
-    head: [['Item', 'Qty', 'Revenue (EGP)']],
-    body: stats.itemBreakdown.map(i => [i.name, i.qty, money(i.revenue)]),
-    theme: 'striped', headStyles: { fillColor: [43, 29, 20] }
-  });
-
-  doc.addPage();
-  doc.setFontSize(14);
-  doc.text('Order Detail', 14, 18);
-  doc.autoTable({
-    startY: 26,
-    head: [['Time', 'Status', 'Items', 'Subtotal', 'Discount', 'Total']],
-    body: reportState.orders.map(o => [
-      new Date(o.created_at).toLocaleString(),
-      o.status,
-      o.items.map(i => `${i.quantity}x ${i.item_name}`).join(', '),
-      money(o.subtotal), money(o.reward_discount), money(o.total)
-    ]),
-    theme: 'grid', headStyles: { fillColor: [43, 29, 20] }, styles: { fontSize: 8 }
-  });
-
-  doc.save(`Tabl0_Report_${state.tenant.slug}_${reportState.rangeLabel.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.pdf`);
-}
-
-// ============================================================
-// BILLING — plan management + estimated amount due, computed live from real orders
-// ============================================================
-let billingSummary = null;
-async function loadBillingSummary() {
-  const now = new Date();
-  const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const { data } = await sb.rpc('get_billing_summary', {
-    p_tenant_id: state.tenant.id,
-    p_period_start: periodStart.toISOString(),
-    p_period_end: periodEnd.toISOString()
-  });
-  billingSummary = data;
-  renderBillingTab();
-}
-
-function renderBillingTab() {
-  const body = document.getElementById('tab-body');
-  if (!body) return;
-  const t = state.tenant;
-  const plan = t.billing_plan || 'payg';
-
-  body.innerHTML = `
-    <div class="ticket">
-      <h2>Current plan</h2>
-      <div class="grid2">
-        <div class="category-block" style="${plan==='payg' ? 'border-color:var(--gold)' : ''}">
-          <h3 style="font-size:16px">Pay-as-you-go ${plan==='payg' ? '<span class="pill ok">Current</span>' : ''}</h3>
-          <div style="font-size:22px;font-weight:bold;margin:6px 0">0.8%<span style="font-size:13px;font-weight:normal;color:var(--ink-soft)"> per order</span></div>
-          <p class="small">No monthly fee.</p>
-          ${plan!=='payg' ? '<button class="btn btn-sm" onclick="switchToPayg()">Switch to this plan</button>' : ''}
-        </div>
-        <div class="category-block" style="${plan==='pro' ? 'border-color:var(--gold)' : ''}">
-          <h3 style="font-size:16px">Pro ${plan==='pro' ? `<span class="pill ${t.subscription_status==='active'?'ok':'warn'}">${escapeHtml(t.subscription_status)}</span>` : ''}</h3>
-          <div style="font-size:22px;font-weight:bold;margin:6px 0">800 EGP<span style="font-size:13px;font-weight:normal;color:var(--ink-soft)">/month</span></div>
-          <p class="small">0% per order.</p>
-          ${plan!=='pro' ? '<button class="btn btn-sm" onclick="startProCheckout()">Switch to this plan</button>' : ''}
-        </div>
-      </div>
-    </div>
-
-    ${plan === 'payg' ? `
-      <div class="ticket">
-        <h2>This month</h2>
-        ${!billingSummary ? '<div class="empty">Calculating…</div>' : `
-          <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
-            <div class="stat-card"><div class="stat-num">${money(billingSummary.gross_sales)}</div><div class="stat-label">Gross sales (EGP)</div></div>
-            <div class="stat-card"><div class="stat-num">${billingSummary.order_count}</div><div class="stat-label">Orders</div></div>
-            <div class="stat-card"><div class="stat-num" style="color:var(--gold)">${money(billingSummary.estimated_due)}</div><div class="stat-label">Estimated amount due (EGP)</div></div>
-          </div>
-          <p class="small" style="margin-top:14px">This is a live estimate at your current rate (0.8%) — it isn't an invoice. Automated fee collection isn't active yet; this will be deducted automatically from order payments once card/wallet payments are fully live.</p>
-        `}
-      </div>
-    ` : `
-      <div class="ticket">
-        <h2>Subscription</h2>
-        <p class="lead">You're on Pro — 0% per order, no per-order fee calculation needed. Your subscription is billed directly by Stripe.</p>
-      </div>
-    `}
-  `;
-}
-
-function renderSupportTab() {
-  const body = document.getElementById('tab-body');
-  if (!body) return;
-  body.innerHTML = `
-    <div class="ticket">
-      <h2>Contact support</h2>
-      <div id="support-msg" class="msg hidden"></div>
-      <label>Subject</label><input id="sup-subject" placeholder="e.g. Payout not showing up"/>
-      <label>Message</label><textarea id="sup-message" rows="4" placeholder="Describe the issue…"></textarea>
-      <div class="nav-actions"><span></span><button class="btn btn-solid" onclick="submitTicket()">Send to Tabl0 support</button></div>
-    </div>
-    <div class="ticket">
-      <h2>Your tickets</h2>
-      ${myTickets.length === 0 ? '<div class="empty">No support tickets yet.</div>' : myTickets.map(tk => `
-        <div style="border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:12px">
-          <div style="display:flex;justify-content:space-between"><strong>${escapeHtml(tk.subject)}</strong><span class="pill ${tk.status==='resolved'?'ok':'warn'}">${escapeHtml(tk.status.replace('_',' '))}</span></div>
-          <p class="small" style="margin-top:6px">${escapeHtml(tk.message)}</p>
-          ${tk.admin_response ? `<div style="background:var(--crema);padding:8px;border-radius:var(--radius);margin-top:8px"><strong>Tabl0 support:</strong> ${escapeHtml(tk.admin_response)}</div>` : ''}
-        </div>
-      `).join('')}
-    </div>
-  `;
-}
-async function submitTicket() {
-  const subject = document.getElementById('sup-subject').value.trim();
-  const message = document.getElementById('sup-message').value.trim();
-  if (!subject || !message) return showMsg('support-msg', 'Subject and message are both required.', 'error');
-  const { error } = await sb.from('support_tickets').insert({ tenant_id: state.tenant.id, subject, message, created_by: state.user.id });
-  if (error) return showMsg('support-msg', error.message, 'error');
-  await loadMyTickets();
-  showMsg('support-msg', 'Sent — we\'ll respond here.', 'ok');
-}
-
-function renderOrdersTab() {
-  const payoutStatus = state.tenant.stripe_connect_status || 'not_started';
-  return `
-    <div class="ticket">
-      <div class="eyebrow">${escapeHtml(state.tenant.slug)}</div>
-      <h1>${escapeHtml(state.tenant.name)}</h1>
-      <p class="lead">${state.tables.length} table${state.tables.length===1?'':'s'} · ${state.items.length} menu item${state.items.length===1?'':'s'} · Payout: <span class="pill ${payoutStatus==='verified'?'':'warn'}">${payoutStatus.replace('_',' ')}</span></p>
-    </div>
-    <div class="ticket">
-      <h2>Live orders</h2>
-      ${state.orders.length === 0 ? '<div class="empty">No orders yet. Once a customer scans a table QR and orders, it shows up here in real time.</div>' :
-        state.orders.map(o => renderOrderCard(o)).join('')}
-    </div>
-  `;
-}
-
-function renderOrderCard(o) {
-  const lines = state.orderItems.filter(oi => oi.order_id === o.id);
-  const table = state.tables.find(t => t.id === o.table_id);
-  const tableLabel = table ? (table.display_name || table.table_code) : o.table_id.slice(0,4);
-  const isCancelled = o.status === 'cancelled';
-  return `
-    <div style="padding:10px 0;border-bottom:1px dashed var(--line)">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-        <span style="flex:1;font-weight:bold">Table ${escapeHtml(tableLabel)} <span class="small" style="font-weight:normal">· #${o.id.slice(0,8)}</span></span>
-        <span class="status-badge status-${o.status}">${o.status}</span>
-        ${isCancelled ? '' : `
-          <select onchange="updateOrderStatus('${o.id}', this.value)" style="width:auto">
-            <option value="pending" ${o.status==='pending'?'selected':''}>Pending</option>
-            <option value="preparing" ${o.status==='preparing'?'selected':''}>Preparing</option>
-            <option value="ready" ${o.status==='ready'?'selected':''}>Ready</option>
-            <option value="served" ${o.status==='served'?'selected':''}>Served</option>
-          </select>
-          <button class="icon-btn" style="color:var(--error)" onclick="cancelOrder('${o.id}')" title="Cancel this order">✕ Cancel</button>
-        `}
-      </div>
-      ${isCancelled && o.cancellation_reason ? `<div class="msg error" style="margin-bottom:8px">Cancelled: ${escapeHtml(o.cancellation_reason)}</div>` : ''}
-      ${lines.length === 0 ? '<div class="small">No items recorded for this order</div>' : lines.map(li => `
-        <div style="display:flex;justify-content:space-between;padding:3px 0 3px 12px;font-size:13px">
-          <span>${li.quantity}× ${escapeHtml(li.item_name)}${renderVariantSummary(li.selected_variants)}</span>
-          <span class="item-price">${money(li.line_total)} EGP</span>
-        </div>
-      `).join('')}
-      ${o.reward_discount > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0 3px 12px;font-size:13px;color:var(--ok)"><span>Reward applied</span><span>-${money(o.reward_discount)} EGP</span></div>` : ''}
-      <div style="display:flex;justify-content:flex-end;padding-top:4px;font-weight:bold">${money(o.total)} EGP</div>
-      ${o.notes ? `<div class="small" style="padding-left:12px">Note: ${escapeHtml(o.notes)}</div>` : ''}
-    </div>
-  `;
-}
-
-function renderVariantSummary(selectedVariants) {
-  if (!selectedVariants || !Array.isArray(selectedVariants) || selectedVariants.length === 0) return '';
-  const names = selectedVariants.map(v => v.name).filter(Boolean);
-  return names.length ? ` <span class="small">(${escapeHtml(names.join(', '))})</span>` : '';
-}
-
-// ============================================================
-// KITCHEN VIEW — full-screen queue for a mounted tablet, nothing else
-// ============================================================
-function renderKitchen() {
-  topbarRight.innerHTML = `<span class="userline">Kitchen · ${escapeHtml(state.tenant ? state.tenant.name : '')}</span><button class="btn" onclick="handleLogout()">Sign out</button>`;
-
-  const active = state.orders.filter(o => o.status !== 'served' && o.status !== 'cancelled');
-  const pending = active.filter(o => o.status === 'pending');
-  const preparing = active.filter(o => o.status === 'preparing');
-  const ready = active.filter(o => o.status === 'ready');
-
-  root.innerHTML = `
-    <div style="padding:20px">
-      ${!audioUnlocked ? `
-        <div class="msg" style="background:rgba(192,138,46,0.15);color:var(--gold);border:1px solid var(--gold);font-size:15px;padding:14px 18px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">
-          <span>🔔 Tap to enable sound alerts for new orders — required once per session, browsers block sound otherwise.</span>
-          <button class="btn btn-solid" onclick="unlockAudioAlerts()">Enable sound</button>
-        </div>
-      ` : ''}
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-        <h1 style="font-size:28px">Live Orders</h1>
-        ${audioUnlocked ? '<button class="btn" onclick="playAlertSound()" title="Test alert sound">🔊 Test sound</button>' : ''}
-      </div>
-      ${active.length === 0 ? '<div class="empty" style="font-size:18px;padding:80px 20px">No active orders. New orders will appear here with a sound alert.</div>' : `
-        <div class="grid2" style="grid-template-columns:1fr 1fr 1fr;gap:16px">
-          ${renderKitchenColumn('Pending', pending, '#C08A2E')}
-          ${renderKitchenColumn('Preparing', preparing, '#3D6B4A')}
-          ${renderKitchenColumn('Ready', ready, '#2D6E8C')}
-        </div>
-      `}
-    </div>
-  `;
-}
-
-function renderKitchenColumn(title, orders, color) {
-  return `
-    <div>
-      <h2 style="border-color:${color};color:${color}">${escapeHtml(title)} (${orders.length})</h2>
-      ${orders.length === 0 ? '<div class="small" style="padding:12px 0">None</div>' : orders.map(o => renderOrderCard(o)).join('')}
-    </div>
-  `;
-}
-
-function renderMenuTab() {
-  const otherItems = (currentId) => state.items.filter(i => i.id !== currentId && state.variantGroups.some(g => g.menu_item_id === i.id));
-  return `
-    <div class="ticket">
-      <h2>Menu</h2>
-      <div id="menu-msg" class="msg hidden"></div>
-      <div class="row" style="margin-bottom:18px">
-        <div><label>New category</label><input id="m-cat-name" placeholder="e.g. Cold Drinks, Pastries" /></div>
-        <div style="flex:0 0 auto;"><button class="btn btn-solid" onclick="menuAddCategory()">Add category</button></div>
-      </div>
-      ${state.categories.length === 0 ? '<div class="empty">No categories yet — add one above to start building your menu.</div>' : ''}
-      ${state.categories.map(c => renderCategoryBlock(c, otherItems)).join('')}
-    </div>
-  `;
-}
-
-function renderCategoryBlock(c, otherItemsFn) {
-  const items = state.items.filter(i => i.category_id === c.id);
-  return `
-    <div class="category-block">
-      <div class="category-head">
-        <div class="category-title-edit">
-          <input value="${escapeHtml(c.name)}" onchange="updateCategory('${c.id}', {name: this.value})" />
-        </div>
-        <button class="icon-btn" onclick="deleteCategory('${c.id}')" title="Delete category">✕ Delete</button>
-      </div>
-      <div class="checkline" style="margin:0 0 10px">
-        <input type="checkbox" id="drink-cat-${c.id}" ${c.is_drink_category ? 'checked' : ''} onchange="updateCategory('${c.id}', {is_drink_category: this.checked})"/>
-        <label for="drink-cat-${c.id}" style="margin:0;display:inline">This is a drinks category — items here count toward loyalty rewards</label>
-      </div>
-      ${items.map(i => renderItemCard(i, otherItemsFn)).join('')}
-      <div class="row" style="margin-top:12px">
-        <div><input id="new-item-name-${c.id}" placeholder="New item name" /></div>
-        <div style="flex:0 0 90px"><input id="new-item-price-${c.id}" placeholder="EGP" /></div>
-        <div style="flex:0 0 auto"><button class="btn btn-sm" onclick="menuAddItem('${c.id}')">Add item</button></div>
-      </div>
-    </div>
-  `;
-}
-
-function renderItemCard(item, otherItemsFn) {
-  const expanded = state.expandedItemId === item.id;
-  const groups = state.variantGroups.filter(g => g.menu_item_id === item.id);
-  const others = otherItemsFn(item.id);
-  return `
-    <div class="item-card">
-      <div class="item-head">
-        <span class="item-name">${escapeHtml(item.name)}</span>
-        ${item.sold_out ? '<span class="pill warn">Sold out</span>' : ''}
-        ${groups.length ? `<span class="pill muted">${groups.length} variant group${groups.length===1?'':'s'}</span>` : ''}
-        ${item.prep_time_minutes ? `<span class="pill muted">~${item.prep_time_minutes} min</span>` : ''}
-        <span class="item-price">${money(item.base_price)} EGP</span>
-        <button class="btn btn-sm" onclick="toggleItemDetail('${item.id}')">${expanded ? 'Close' : 'Edit'}</button>
-      </div>
-      ${expanded ? `
-        <div class="item-detail">
-          <div class="row">
-            <div><label>Name</label><input id="edit-name-${item.id}" value="${escapeHtml(item.name)}"/></div>
-            <div style="flex:0 0 100px"><label>Price (EGP)</label><input id="edit-price-${item.id}" value="${item.base_price}"/></div>
-            <div style="flex:0 0 110px"><label>Prep time (min)</label><input id="edit-prep-${item.id}" value="${item.prep_time_minutes || ''}" placeholder="8"/></div>
-          </div>
-          <label>Description</label>
-          <textarea id="edit-desc-${item.id}" rows="2">${escapeHtml(item.description || '')}</textarea>
-          <label>Photo URL</label>
-          <input id="edit-photo-${item.id}" value="${escapeHtml(item.photo_url || '')}" placeholder="https://…"/>
-          <div class="checkline" style="margin-top:12px">
-            <input type="checkbox" id="edit-loyalty-${item.id}" ${item.counts_toward_loyalty !== false ? 'checked' : ''} onchange="toggleCountsTowardLoyalty('${item.id}', this.checked)"/>
-            <label for="edit-loyalty-${item.id}" style="margin:0;display:inline">Counts toward loyalty rewards (only matters if this item's category is marked as a drinks category above)</label>
-          </div>
-          <div class="nav-actions">
-            <div>
-              <button class="btn btn-sm ${item.sold_out ? '' : 'btn-danger'}" onclick="toggleSoldOut('${item.id}', ${item.sold_out})">${item.sold_out ? 'Mark in stock' : 'Mark sold out'}</button>
-              <button class="btn btn-sm btn-danger" onclick="deleteItem('${item.id}')">Delete item</button>
-            </div>
-            <button class="btn btn-sm btn-solid" onclick="saveItemEdits('${item.id}')">Save</button>
-          </div>
-
-          <hr class="divider"/>
-          <h3>Variants (size, milk type, add-ons…)</h3>
-          ${others.length ? `
-            <div class="row" style="align-items:center">
-              <div style="flex:0 0 auto" class="small">Copy variants from</div>
-              <div>
-                <select id="copy-src-${item.id}">
-                  <option value="">Choose an item…</option>
-                  ${others.map(o => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('')}
-                </select>
-              </div>
-              <div style="flex:0 0 auto"><button class="btn btn-sm" onclick="copyVariantsToItem('${item.id}', document.getElementById('copy-src-${item.id}').value)">Copy</button></div>
-            </div>
-          ` : ''}
-          ${groups.map(g => renderVariantGroup(g)).join('')}
-          <div class="variant-add-row">
-            <input id="new-group-name-${item.id}" placeholder="Group name, e.g. Size or Milk type" style="flex:1"/>
-            <select id="new-group-type-${item.id}" style="flex:0 0 120px">
-              <option value="single">Single choice</option>
-              <option value="multiple">Multiple choice</option>
-            </select>
-            <label class="checkline" style="margin:0"><input type="checkbox" id="new-group-required-${item.id}"/> Required</label>
-            <button class="btn btn-sm" onclick="menuAddVariantGroup('${item.id}')">Add group</button>
-          </div>
-        </div>
-      ` : ''}
-    </div>
-  `;
-}
-
-function renderVariantGroup(g) {
-  const options = state.variantOptions.filter(o => o.variant_group_id === g.id);
-  return `
-    <div class="variant-group">
-      <div class="variant-group-head">
-        <strong style="flex:1">${escapeHtml(g.name)}</strong>
-        <span class="small">${g.selection_type === 'single' ? 'pick one' : 'pick any'}</span>
-        <label class="checkline" style="margin:0">
-          <input type="checkbox" ${g.required ? 'checked' : ''} onchange="updateVariantGroupRequired('${g.id}', this.checked)"/> Required
-        </label>
-        <button class="icon-btn" onclick="deleteVariantGroup('${g.id}')" title="Delete group">✕</button>
-      </div>
-      ${options.map(o => `
-        <div class="variant-option-row">
-          <span class="item-name">${escapeHtml(o.name)}${o.sold_out ? ' <span class="pill warn">sold out</span>' : ''}</span>
-          <span class="small">${o.price_delta >= 0 ? '+' : ''}${money(o.price_delta)} EGP</span>
-          <button class="icon-btn" onclick="toggleOptionSoldOut('${o.id}', ${o.sold_out})" title="Toggle sold out">⦿</button>
-          <button class="icon-btn" onclick="deleteVariantOption('${o.id}')" title="Delete option">✕</button>
-        </div>
-      `).join('') || '<div class="small">No options yet</div>'}
-      <div class="variant-add-row">
-        <input id="new-opt-name-${g.id}" placeholder="Option name, e.g. Large" style="flex:1"/>
-        <input id="new-opt-delta-${g.id}" placeholder="Price +/- EGP" style="flex:0 0 110px"/>
-        <button class="btn btn-sm" onclick="menuAddVariantOption('${g.id}')">Add option</button>
-      </div>
-    </div>
-  `;
-}
-
-function menuAddCategory() {
-  const el = document.getElementById('m-cat-name');
-  addCategoryLive(el.value); el.value = '';
-}
-function menuAddItem(catId) {
-  const nameEl = document.getElementById('new-item-name-' + catId);
-  const priceEl = document.getElementById('new-item-price-' + catId);
-  addItemLive(catId, nameEl.value, priceEl.value);
-  nameEl.value = ''; priceEl.value = '';
-}
-function menuAddVariantGroup(itemId) {
-  const name = document.getElementById('new-group-name-' + itemId).value;
-  const type = document.getElementById('new-group-type-' + itemId).value;
-  const required = document.getElementById('new-group-required-' + itemId).checked;
-  addVariantGroup(itemId, name, type, required);
-}
-function menuAddVariantOption(groupId) {
-  const name = document.getElementById('new-opt-name-' + groupId).value;
-  const delta = document.getElementById('new-opt-delta-' + groupId).value;
-  addVariantOption(groupId, name, delta);
-}
-
-function renderTablesTab() {
-  return `
-    <div class="ticket">
-      <h2>Tables &amp; QR codes</h2>
-      <div id="tables-msg" class="msg hidden"></div>
-      <div class="row" style="margin-bottom:20px">
-        <div><label>Table code</label><input id="t-code" placeholder="A07"/></div>
-        <div><label>Display name (optional)</label><input id="t-name" placeholder="Patio Table 7"/></div>
-        <div style="flex:0 0 auto"><button class="btn btn-solid" onclick="addTableLive()">Generate QR</button></div>
-      </div>
-      <div class="grid2">${state.tables.map(t => tableQrBlock(t, true)).join('') || '<div class="empty">No tables yet</div>'}</div>
-    </div>
-  `;
-}
-
-function renderLoyaltyTab() {
-  const lp = state.loyalty || {};
-  return `
-    <div class="ticket">
-      <h2>Loyalty program</h2>
-      <div id="loyalty-msg" class="msg hidden"></div>
-      <p class="lead">Reward repeat customers automatically. Changes apply immediately to new orders.</p>
-      <div class="checkline"><input type="checkbox" id="w-loy-active" ${lp.active ? 'checked' : ''}/> Enable loyalty program</div>
-      <div class="row">
-        <div><label>Type</label>
-          <select id="w-loy-type" onchange="document.getElementById('threshold-label').textContent = this.value === 'points' ? 'Cashback %' : 'Items needed'">
-            <option value="punch" ${lp.type==='punch'?'selected':''}>Punch card (buy N qualifying drinks/items)</option>
-            <option value="points" ${lp.type==='points'?'selected':''}>Points (% cashback on spend)</option>
-          </select>
-        </div>
-        <div><label id="threshold-label">${lp.type === 'points' ? 'Cashback %' : 'Items needed'}</label><input id="w-loy-threshold" value="${lp.punch_threshold || lp.points_percent || ''}" placeholder="e.g. 9"/></div>
-      </div>
-      <p class="small" style="margin:8px 0 0">Counts individual qualifying <strong>items</strong>, not orders — a customer buying 3 drinks in one visit progresses 3 units toward the reward, not 1. Choose which items count in the Menu tab (e.g. exclude pastries).</p>
-      <label>Reward description</label><input id="w-loy-desc" value="${lp.reward_description || ''}" placeholder="Free drink of choice"/>
-      ${lp.type === 'points' ? `<label>Reward value (EGP, optional)</label><input id="w-loy-value" value="${lp.reward_value || ''}" placeholder="65"/>` : `
-        <div class="msg" style="background:rgba(61,107,74,0.1);color:var(--ok);border:1px solid rgba(61,107,74,0.3);margin-top:14px">
-          ✓ The reward is automatic — when a customer's qualifying drink completes the count, that exact drink's real price becomes the discount. No value to configure.
-        </div>
-        <input type="hidden" id="w-loy-value" value="${lp.reward_value || ''}"/>
-      `}
-      <div class="nav-actions">
-        <span></span>
-        <button class="btn btn-solid" onclick="saveLoyaltyFromTab()">Save loyalty settings</button>
-      </div>
-    </div>
-  `;
-}
-function saveLoyaltyFromTab() {
-  const active = document.getElementById('w-loy-active').checked;
-  const type = document.getElementById('w-loy-type').value;
-  const threshold = document.getElementById('w-loy-threshold').value;
-  const desc = document.getElementById('w-loy-desc').value;
-  const value = document.getElementById('w-loy-value').value;
-  saveLoyalty(active, type, threshold, desc, value);
-}
-
-function renderSettingsTab() {
-  const t = state.tenant;
-  const payoutStatus = t.stripe_connect_status || 'not_started';
-  return `
-    <div class="ticket">
-      <h2>Store details</h2>
-      <div id="settings-msg" class="msg hidden"></div>
-      <label>Café name</label><input id="s-name" value="${escapeHtml(t.name)}"/>
-      <label>Address</label><input id="s-address" value="${escapeHtml(t.address || '')}"/>
-      <div class="row">
-        <div><label>Primary color (hex)</label><input id="s-primary-color" value="${escapeHtml(t.primary_color || '')}" placeholder="#2E7D32"/></div>
-        <div><label>Accent color (hex)</label><input id="s-accent-color" value="${escapeHtml(t.accent_color || '')}" placeholder="#D9A44C"/></div>
-      </div>
-      <label>Logo URL</label><input id="s-logo-url" value="${escapeHtml(t.logo_url || '')}" placeholder="https://…"/>
-      <div class="nav-actions">
-        <span class="small">Slug: ${escapeHtml(t.slug)} · Currency: ${escapeHtml(t.currency)}</span>
-        <button class="btn btn-solid" onclick="submitSettings()">Save changes</button>
-      </div>
-    </div>
-    <div class="ticket">
-      <h2>Kitchen staff</h2>
-      <p class="lead">Invite by email — they'll get a real invitation, click the link, set their own password, and land straight in the kitchen queue. No code to share, no self-serve signup.</p>
-      <div id="invite-msg" class="msg hidden"></div>
-      <div class="row" style="align-items:center">
-        <div><input id="invite-email" type="email" placeholder="staff@example.com"/></div>
-        <div style="flex:0 0 auto"><button class="btn btn-sm btn-solid" onclick="sendKitchenInvite()">Send invite</button></div>
-      </div>
-      <hr class="divider"/>
-      <h3>Current staff</h3>
-      <div id="staff-list"><div class="small">Loading…</div></div>
-    </div>
-    <div class="ticket" id="payment-gateway-section">
-      <h2>Payment Gateway</h2>
-      <div class="small">Loading…</div>
-    </div>
-  `;
-}
-
-async function sendKitchenInvite() {
-  const email = document.getElementById('invite-email').value.trim();
-  if (!email) return showMsg('invite-msg', 'Enter an email address.', 'error');
-  const { data: { session } } = await sb.auth.getSession();
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/invite-kitchen-staff`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      tenant_id: state.tenant.id, email,
-      redirect_to: `https://${PLATFORM_DOMAIN}/console.html`
-    })
-  });
-  const data = await res.json();
-  if (data.error) return showMsg('invite-msg', data.error, 'error');
-  showMsg('invite-msg', `Invite sent to ${email}.`, 'ok');
-  document.getElementById('invite-email').value = '';
-  loadStaffList();
-}
-
-async function loadStaffList() {
-  const el = document.getElementById('staff-list');
-  if (!el) return;
-  const { data, error } = await sb.rpc('get_tenant_staff_list', { p_tenant_id: state.tenant.id });
-  if (error || !data) { el.innerHTML = '<div class="small">Could not load staff.</div>'; return; }
-  if (data.length === 0) { el.innerHTML = '<div class="empty">No staff invited yet.</div>'; return; }
-  el.innerHTML = data.map(s => `
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px dashed var(--line)">
-      <div>
-        <strong>${escapeHtml(s.email)}</strong>
-        <span class="pill ${s.confirmed ? 'ok' : 'warn'}" style="margin-left:6px">${s.confirmed ? s.role : 'invite pending'}</span>
-        <div class="small">Invited ${new Date(s.joined_at).toLocaleDateString()}</div>
-      </div>
-      <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" onclick="removeStaffMember('${s.user_id}','${escapeHtml(s.email)}')">Remove</button>
-    </div>
-  `).join('');
-}
-
-// ============================================================
-// PAYMENT GATEWAY — each café picks its own provider. Stripe doesn't
-// officially support Egyptian merchants, so the real local options
-// (Paymob, Kashier, PayTabs, Fawry) use direct credential entry instead
-// of an OAuth-style connect flow.
-// ============================================================
-const PAYMENT_PROVIDERS = {
-  paymob: {
-    label: 'Paymob', flow: 'credentials',
-    blurb: 'Most developer-friendly Egyptian gateway — cards, mobile wallets, Apple/Google Pay, installments.',
-    fields: [
-      { key: 'api_key', label: 'API Key', placeholder: 'From Paymob Dashboard → Settings' },
-      { key: 'hmac_secret', label: 'HMAC Secret', placeholder: 'From Paymob Dashboard → Settings' },
-      { key: 'integration_id', label: 'Card Integration ID', placeholder: 'From Developers → Payment Integrations' },
-      { key: 'iframe_id', label: 'Iframe ID', placeholder: 'From Developers → iFrames' },
-      { key: 'public_key', label: 'Public Key', placeholder: 'From Paymob Dashboard → Settings' }
-    ]
-  },
-  kashier: {
-    label: 'Kashier', flow: 'credentials',
-    blurb: 'Modern Egyptian gateway with a clean checkout experience.',
-    fields: [
-      { key: 'merchant_id', label: 'Merchant ID (MID)', placeholder: 'e.g. MID-46-111 — shown under your username in the dashboard' },
-      { key: 'api_key', label: 'Payment API Key', placeholder: 'From "Payment API Keys" section — the UUID, e.g. d6f77d13-...' },
-      { key: 'secret_key', label: 'Secret Key (not used for checkout — kept for future direct API calls)', placeholder: 'From "Secret Keys" section' }
-    ]
-  },
-  paytabs: {
-    label: 'PayTabs', flow: 'credentials',
-    blurb: 'MENA-wide gateway — useful if you operate across Egypt and the Gulf.',
-    fields: [
-      { key: 'profile_id', label: 'Profile ID', placeholder: 'From PayTabs Dashboard' },
-      { key: 'server_key', label: 'Server Key', placeholder: 'From PayTabs Dashboard → Developers' },
-      { key: 'client_key', label: 'Client Key', placeholder: 'From PayTabs Dashboard → Developers' }
-    ]
-  },
-  fawry: {
-    label: 'Fawry', flow: 'credentials',
-    blurb: "Egypt's largest payment network — 300,000+ physical payment points nationwide.",
-    fields: [
-      { key: 'merchant_code', label: 'Merchant Code', placeholder: 'From FawryPay Merchant Portal' },
-      { key: 'security_key', label: 'Security Key', placeholder: 'From FawryPay Merchant Portal' }
-    ]
-  },
-  stripe: {
-    label: 'Stripe', flow: 'oauth',
-    blurb: 'Requires a company registered outside Egypt (Stripe does not support Egyptian merchants directly).'
-  }
-};
-
-let paymentGatewayState = { status: null, selectedProvider: null };
-
-async function loadPaymentGatewayStatus() {
-  const { data } = await sb.rpc('get_payment_gateway_status', { p_tenant_id: state.tenant.id });
-  paymentGatewayState.status = data;
-  renderPaymentGatewaySection();
-}
-
-function renderPaymentGatewaySection() {
-  const el = document.getElementById('payment-gateway-section');
-  if (!el) return;
-  const st = paymentGatewayState.status;
-
-  if (st && st.status === 'configured') {
-    const p = PAYMENT_PROVIDERS[st.provider];
-    el.innerHTML = `
-      <h2>Payment Gateway</h2>
-      <div class="msg ok" style="display:flex;justify-content:space-between;align-items:center">
-        <span>✓ Connected to <strong>${p ? p.label : st.provider}</strong></span>
-        <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" onclick="disconnectGateway()">Disconnect</button>
-      </div>
-      <p class="small" style="margin-top:8px">Configured ${st.configured_at ? new Date(st.configured_at).toLocaleDateString() : ''}. Credentials are stored securely and never shown again — disconnect and reconnect to change them.</p>
-    `;
-    return;
-  }
-
-  el.innerHTML = `
-    <h2>Payment Gateway</h2>
-    <p class="lead">Choose the provider your café already uses (or wants to use) to accept customer payments.</p>
-    <div id="provider-cards" class="grid2" style="grid-template-columns:1fr 1fr;gap:10px"></div>
-    <div id="provider-form-area" style="margin-top:16px"></div>
-  `;
-  renderProviderCards();
-}
-
-function renderProviderCards() {
-  const el = document.getElementById('provider-cards');
-  if (!el) return;
-  el.innerHTML = Object.entries(PAYMENT_PROVIDERS).map(([key, p]) => `
-    <div class="category-block" style="cursor:pointer;padding:14px;${paymentGatewayState.selectedProvider===key?'border-color:var(--gold)':''}" onclick="selectPaymentProvider('${key}')">
-      <h3 style="font-size:15px;margin-bottom:4px">${p.label}</h3>
-      <p class="small">${p.blurb}</p>
-    </div>
-  `).join('');
-}
-
-function selectPaymentProvider(key) {
-  paymentGatewayState.selectedProvider = key;
-  renderProviderCards();
-  const p = PAYMENT_PROVIDERS[key];
-  const formArea = document.getElementById('provider-form-area');
-
-  if (p.flow === 'oauth') {
-    formArea.innerHTML = `
-      <div class="ticket" style="padding:16px;background:#fff">
-        <p class="small" style="margin-bottom:10px">${p.blurb}</p>
-        <button class="btn btn-solid" onclick="startStripeOnboarding()">Connect with Stripe</button>
-      </div>
-    `;
-    return;
-  }
-
-  formArea.innerHTML = `
-    <div class="ticket" style="padding:16px;background:#fff">
-      <div id="gateway-msg" class="msg hidden"></div>
-      ${p.fields.map(f => `<label>${f.label}</label><input id="gw-field-${f.key}" placeholder="${f.placeholder}"/>`).join('')}
-      <button class="btn btn-solid" style="margin-top:14px" onclick="savePaymentCredentials('${paymentGatewayState.selectedProvider}')">Connect ${p.label}</button>
-    </div>
-  `;
-}
-
-async function savePaymentCredentials(providerKey) {
-  const p = PAYMENT_PROVIDERS[providerKey];
-  const credentials = {};
-  for (const f of p.fields) {
-    const val = document.getElementById(`gw-field-${f.key}`).value.trim();
-    if (!val) return showMsg('gateway-msg', `${f.label} is required.`, 'error');
-    credentials[f.key] = val;
-  }
-  const { data, error } = await sb.rpc('save_payment_gateway_credentials', {
-    p_tenant_id: state.tenant.id, p_provider: providerKey, p_credentials: credentials
-  });
-  if (error || (data && data.error)) return showMsg('gateway-msg', 'Could not save credentials.', 'error');
-  await loadPaymentGatewayStatus();
-}
-
-async function disconnectGateway() {
-  if (!confirm('Disconnect your payment gateway? Customers won\'t be able to pay online until you reconnect one.')) return;
-  await sb.rpc('disconnect_payment_gateway', { p_tenant_id: state.tenant.id });
-  paymentGatewayState.selectedProvider = null;
-  await loadPaymentGatewayStatus();
-}
-
-async function removeStaffMember(userId, email) {
-  if (!confirm(`Remove ${email}'s access to your café?`)) return;
-  await sb.rpc('remove_tenant_staff', { p_tenant_id: state.tenant.id, p_user_id: userId });
-  loadStaffList();
-}
-
-async function startStripeOnboarding() {
-  const { data: { session } } = await sb.auth.getSession();
-  if (!session) return;
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/stripe-connect-onboarding`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tenant_id: state.tenant.id, return_url: window.location.href, refresh_url: window.location.href })
-  });
-  const data = await res.json();
-  if (data.error) return alert('Could not start onboarding: ' + data.error);
-  window.location.href = data.url;
-}
+function escapeAttr(s) { return String(s || '').replace(/"/g, ''); }
 </script>
 </body>
 </html>
