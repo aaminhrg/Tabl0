@@ -867,6 +867,53 @@ async function loadAdminBilling() {
   const { data } = await sb.rpc('get_admin_billing_overview', { p_period_start: start.toISOString(), p_period_end: end.toISOString() });
   adminBillingData = data || [];
   renderAdminBillingTab();
+  loadPlatformGatewayStatus();
+}
+
+const PLATFORM_PAYMOB_FIELDS = [
+  { key: 'api_key', label: 'API Key' },
+  { key: 'hmac_secret', label: 'HMAC Secret' },
+  { key: 'integration_id', label: 'Card Integration ID' },
+  { key: 'iframe_id', label: 'Iframe ID' },
+];
+
+async function loadPlatformGatewayStatus() {
+  const { data } = await sb.rpc('get_platform_payment_gateway_status');
+  const el = document.getElementById('platform-gateway-status');
+  if (!el) return;
+  if (data && data.configured) {
+    el.innerHTML = `
+      <div class="msg ok" style="display:flex;justify-content:space-between;align-items:center">
+        <span>✓ Connected — configured ${data.configured_at ? new Date(data.configured_at).toLocaleDateString() : ''}</span>
+        <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" onclick="disconnectPlatformGateway()">Disconnect</button>
+      </div>
+      <p class="small" style="margin-top:8px">Credentials are stored securely and never shown again — disconnect and reconnect to change them.</p>
+    `;
+  } else {
+    el.innerHTML = `
+      <div id="platform-gateway-msg" class="msg hidden"></div>
+      ${PLATFORM_PAYMOB_FIELDS.map(f => `<label>${f.label}</label><input id="pg-field-${f.key}" placeholder="From Tabl0's own Paymob account"/>`).join('')}
+      <button class="btn btn-solid" style="margin-top:10px" onclick="savePlatformGateway()">Connect Paymob</button>
+    `;
+  }
+}
+
+async function savePlatformGateway() {
+  const credentials = {};
+  for (const f of PLATFORM_PAYMOB_FIELDS) {
+    const val = document.getElementById(`pg-field-${f.key}`).value.trim();
+    if (!val) return showMsg('platform-gateway-msg', `${f.label} is required.`, 'error');
+    credentials[f.key] = val;
+  }
+  const { data } = await sb.rpc('save_platform_payment_credentials', { p_credentials: credentials });
+  if (data && data.error) return showMsg('platform-gateway-msg', data.error, 'error');
+  loadPlatformGatewayStatus();
+}
+
+async function disconnectPlatformGateway() {
+  if (!confirm('Disconnect Tabl0\'s own Paymob account? Cafés won\'t be able to pay for Pro until you reconnect one.')) return;
+  await sb.rpc('disconnect_platform_payment_gateway');
+  loadPlatformGatewayStatus();
 }
 
 function needsFollowUp(row) {
@@ -899,6 +946,11 @@ function renderAdminBillingTab() {
         <div class="stat-card"><div class="stat-num">${money(proRevenue)}</div><div class="stat-label">Pro subscription revenue (EGP)</div></div>
       </div>
       ${followUpCount > 0 ? `<div class="msg" style="background:rgba(166,61,47,0.1);color:var(--error);border:1px solid rgba(166,61,47,0.3);margin-top:12px">⚠ ${followUpCount} business${followUpCount===1?'':'es'} need follow-up (unpaid dues or lapsed subscription)</div>` : ''}
+    </div>
+    <div class="ticket" id="platform-gateway-section">
+      <h2>Tabl0's payment gateway</h2>
+      <p class="lead">Used to collect Pro subscription payments FROM cafés — separate from any café's own gateway, which collects customer payments TO them.</p>
+      <div id="platform-gateway-status" class="small">Loading…</div>
     </div>
     <div class="ticket">
       <h2>By business</h2>
