@@ -500,9 +500,9 @@ async function startProCheckout(billingCycle) {
     alert('Pro plan payment isn\'t available yet: ' + data.error + '\n\nYou can continue with Pay-as-you-go for now.');
     return;
   }
-  showProPaymentCheckout(data.checkout_url, data.pro_fee, data.outstanding_dues, data.total_amount);
+  showProPaymentCheckout(data.checkout_url, data.pro_fee, data.outstanding_dues, data.total_amount, data.billing_cycle);
 }
-function showProPaymentCheckout(checkoutUrl, proFee, outstandingDues, totalAmount) {
+function showProPaymentCheckout(checkoutUrl, proFee, outstandingDues, totalAmount, billingCycle) {
   // Paymob's product is specifically an IFRAME product — embedding it
   // (rather than a full-page redirect) is what actually works, same
   // lesson learned building the customer checkout flow.
@@ -512,26 +512,81 @@ function showProPaymentCheckout(checkoutUrl, proFee, outstandingDues, totalAmoun
   const dues = outstandingDues || 0;
   const fee = proFee || 800;
   const total = totalAmount || fee;
+  const cycle = billingCycle === 'annual' ? 'annual' : 'monthly';
+  const periodLabel = cycle === 'annual' ? '365 days' : '30 days';
+  window.__wantsAutoRenew = false;
+
   body.innerHTML = `
-    <div class="ticket">
-      <h2>Upgrade to Pro</h2>
-      <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px">
-        <div style="font-family:var(--mono);font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">Bill summary</div>
-        <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px"><span>Pro plan — 30 days</span><span style="font-family:var(--mono)">${money(fee)} EGP</span></div>
-        <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px"><span>Outstanding Pay-as-you-go dues</span><span style="font-family:var(--mono)">${dues > 0 ? money(dues) : '0.00'} EGP</span></div>
-        <div style="display:flex;justify-content:space-between;padding:10px 0 0;margin-top:6px;border-top:1.5px solid var(--ink);font-size:16px;font-weight:bold"><span>Total due today</span><span style="font-family:var(--mono);color:var(--gold)">${money(total)} EGP</span></div>
+    <div style="max-width:560px;margin:0 auto">
+      <div style="text-align:center;margin-bottom:28px">
+        <div style="font-family:var(--mono);font-size:11px;letter-spacing:0.08em;color:var(--gold);text-transform:uppercase;margin-bottom:8px">Upgrade</div>
+        <h1 style="font-size:28px;margin-bottom:6px">Tabl0 Pro</h1>
+        <p style="color:var(--ink-soft);font-size:14px">Keep 100% of every sale — no per-order platform fee.</p>
       </div>
-      <p class="lead" style="font-size:13px">You'll be returned here automatically once it's confirmed.</p>
-      <iframe src="${checkoutUrl.replace(/"/g, '&quot;')}" style="width:100%;height:70vh;border:1px solid var(--line);border-radius:12px;background:#fff"></iframe>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:20px">
+        <div style="text-align:center;padding:10px;border-radius:8px;background:rgba(192,138,46,0.08)">
+          <div style="font-size:12px;color:var(--ink-soft)">0% fee</div>
+          <div style="font-size:13px;font-weight:bold">vs 0.8% on PAYG</div>
+        </div>
+        <div style="text-align:center;padding:10px;border-radius:8px;background:rgba(192,138,46,0.08)">
+          <div style="font-size:12px;color:var(--ink-soft)">Billing</div>
+          <div style="font-size:13px;font-weight:bold">${cycle === 'annual' ? 'Annual · 2 months free' : 'Monthly'}</div>
+        </div>
+      </div>
+
+      <div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px;margin-bottom:18px;box-shadow:0 2px 12px rgba(43,29,20,0.05)">
+        <div style="font-family:var(--mono);font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:14px">Order summary</div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:14px">
+          <span>Pro plan — ${periodLabel}</span>
+          <span style="font-family:var(--mono)">${money(fee)} EGP</span>
+        </div>
+        ${dues > 0 ? `
+          <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:14px;color:var(--ink-soft)">
+            <span>Outstanding Pay-as-you-go dues</span>
+            <span style="font-family:var(--mono)">${money(dues)} EGP</span>
+          </div>
+        ` : `
+          <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:13px;color:var(--ink-soft)">
+            <span>Pay-as-you-go dues</span>
+            <span style="font-family:var(--mono)">None outstanding</span>
+          </div>
+        `}
+        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:14px 0 0;margin-top:6px;border-top:1.5px solid var(--ink)">
+          <span style="font-weight:bold;font-size:15px">Total due today</span>
+          <span style="font-family:var(--mono);color:var(--gold);font-size:22px;font-weight:bold">${money(total)} EGP</span>
+        </div>
+      </div>
+
+      <label style="display:flex;align-items:flex-start;gap:10px;padding:14px 16px;background:var(--crema);border-radius:10px;margin-bottom:18px;cursor:pointer">
+        <input type="checkbox" style="margin-top:2px" onchange="window.__wantsAutoRenew = this.checked"/>
+        <span style="font-size:13px;line-height:1.4">
+          <strong>Enable auto-renewal</strong> — check "Save Card" during payment below, and your ${cycle === 'annual' ? 'year' : 'month'} will renew automatically without needing to pay manually again.
+        </span>
+      </label>
+
+      <div style="background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:14px">
+        <iframe src="${checkoutUrl.replace(/"/g, '&quot;')}" style="width:100%;height:66vh;border:none;display:block"></iframe>
+      </div>
+
+      <p style="text-align:center;font-size:12px;color:var(--ink-soft)">🔒 Secured by Paymob · You'll be returned here automatically once confirmed</p>
     </div>
   `;
   const pollInterval = setInterval(async () => {
-    const { data } = await sb.from('tenants').select('billing_plan, subscription_status, pro_paid_until').eq('id', state.tenant.id).single();
-    if (data && data.billing_plan === 'pro' && data.subscription_status === 'active') {
+    const { data } = await sb.from('tenants').select('billing_plan, subscription_status, pro_paid_until, paymob_card_token, auto_renew').eq('id', state.tenant.id).single();
+    if (!data) return;
+    // If they opted in and a card token just became available (captured via
+    // Paymob's separate "Save Card" callback), complete the loop here
+    // automatically rather than requiring a separate manual toggle later.
+    if (window.__wantsAutoRenew && data.paymob_card_token && !data.auto_renew) {
+      await sb.rpc('toggle_auto_renew', { p_tenant_id: state.tenant.id, p_enabled: true });
+    }
+    if (data.billing_plan === 'pro' && data.subscription_status === 'active') {
       clearInterval(pollInterval);
       state.tenant.billing_plan = data.billing_plan;
       state.tenant.subscription_status = data.subscription_status;
       state.tenant.pro_paid_until = data.pro_paid_until;
+      state.tenant.billing_cycle = cycle;
       state.tenant.platform_fee_percent = 0;
       renderBillingTab();
     }
