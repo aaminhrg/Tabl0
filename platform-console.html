@@ -871,6 +871,969 @@ async function loadAdminBilling() {
 }
 
 const PLATFORM_PAYMOB_FIELDS = [
+  { key: 'api_key', label: 'API Key', required: true },
+  { key: 'hmac_secret', label: 'HMAC Secret', required: true },
+  { key: 'integration_id', label: 'Card Integration ID', required: true },
+  { key: 'iframe_id', label: 'Iframe ID', required: true },
+  { key: 'recurring_integration_id', label: 'Recurring Integration ID (optional — for auto-renewal)', required: false },
+];
+
+async function loadPlatformGatewayStatus() {
+  const { data } = await sb.rpc('get_platform_payment_gateway_status');
+  const el = document.getElementById('platform-gateway-status');
+  if (!el) return;
+  if (data && data.configured) {
+    el.innerHTML = `
+      <div class="msg ok" style="display:flex;justify-content:space-between;align-items:center">
+        <span>✓ Connected — configured ${data.configured_at ? new Date(data.configured_at).toLocaleDateString() : ''}</span>
+        <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" onclick="disconnectPlatformGateway()">Disconnect</button>
+      </div>
+      <p class="small" style="margin-top:8px">Credentials are stored securely and never shown again — disconnect and reconnect to change them.</p>
+    `;
+  } else {
+    el.innerHTML = `
+      <div id="platform-gateway-msg" class="msg hidden"></div>
+      ${PLATFORM_PAYMOB_FIELDS.map(f => `<label>${f.label}</label><input id="pg-field-${f.key}" placeholder="${f.key === 'recurring_integration_id' ? 'Ask Paymob support, or reuse Card Integration ID for now' : "From Tabl0's own Paymob account"}"/>`).join('')}
+      <button class="btn btn-solid" style="margin-top:10px" onclick="savePlatformGateway()">Connect Paymob</button>
+    `;
+  }
+}
+
+async function savePlatformGateway() {
+  const credentials = {};
+  for (const f of PLATFORM_PAYMOB_FIELDS) {
+    const val = document.getElementById(`pg-field-${f.key}`).value.trim();
+    if (!val && f.required) {
+      const msgEl = document.getElementById('platform-gateway-msg');
+      if (msgEl) { msgEl.textContent = `${f.label} is required.`; msgEl.className = 'msg error'; msgEl.classList.remove('hidden'); }
+      return;
+    }
+    if (val) credentials[f.key] = val;
+  }
+  const { data } = await sb.rpc('save_platform_payment_credentials', { p_credentials: credentials });
+  if (data && data.error) {
+    const msgEl = document.getElementById('platform-gateway-msg');
+    if (msgEl) { msgEl.textContent = data.error; msgEl.className = 'msg error'; msgEl.classList.remove('hidden'); }
+    return;
+  }
+  loadPlatformGatewayStatus();
+}
+
+async function disconnectPlatformGateway() {
+  if (!confirm('Disconnect Tabl0\'s own Paymob account? Cafés won\'t be able to pay for Pro until you reconnect one.')) return;
+  await sb.rpc('disconnect_platform_payment_gateway');
+  loadPlatformGatewayStatus();
+}
+
+function needsFollowUp(row) {
+  if (row.billing_plan === 'pro' && (row.subscription_status === 'past_due' || row.subscription_status === 'cancelled')) return true;
+  if (row.billing_plan === 'payg' && row.estimated_due > 0) return true;
+  return false;
+}
+
+function renderAdminBillingTab() {
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+
+  const totalPayg = adminBillingData.filter(r => r.billing_plan === 'payg').length;
+  const totalPro = adminBillingData.filter(r => r.billing_plan === 'pro').length;
+  const totalDuesOutstanding = adminBillingData.reduce((s, r) => s + Number(r.estimated_due || 0), 0);
+  const totalProActive = adminBillingData.filter(r => r.billing_plan === 'pro' && r.subscription_status === 'active').length;
+  const proRevenue = totalProActive * 800;
+  const followUpCount = adminBillingData.filter(needsFollowUp).length;
+
+  body.innerHTML = `
+    <div class="ticket">
+      <h2>Platform billing</h2>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        ${['This Month','Last Month','This Year'].map(l => `<button class="btn btn-sm ${adminBillingPeriod===l?'btn-solid':''}" onclick="setAdminBillingPeriod('${l}')">${l}</button>`).join('')}
+      </div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-num">${totalPayg}</div><div class="stat-label">Pay-as-you-go cafés</div></div>
+        <div class="stat-card"><div class="stat-num">${totalPro}</div><div class="stat-label">Pro subscribers</div></div>
+        <div class="stat-card"><div class="stat-num">${money(totalDuesOutstanding)}</div><div class="stat-label">Estimated PAYG dues (EGP)</div></div>
+        <div class="stat-card"><div class="stat-num">${money(proRevenue)}</div><div class="stat-label">Pro subscription revenue (EGP)</div></div>
+      </div>
+      ${followUpCount > 0 ? `<div class="msg" style="background:rgba(166,61,47,0.1);color:var(--error);border:1px solid rgba(166,61,47,0.3);margin-top:12px">⚠ ${followUpCount} business${followUpCount===1?'':'es'} need follow-up (unpaid dues or lapsed subscription)</div>` : ''}
+    </div>
+    <div class="ticket" id="platform-gateway-section">
+      <h2>Tabl0's payment gateway</h2>
+      <p class="lead">Used to collect Pro subscription payments FROM cafés — separate from any café's own gateway, which collects customer payments TO them.</p>
+      <div id="platform-gateway-status" class="small">Loading…</div>
+    </div>
+    <div class="ticket">
+      <h2>By business</h2>
+      ${adminBillingData.length === 0 ? '<div class="empty">No businesses yet.</div>' : `
+        <table>
+          <thead><tr><th>Business</th><th>Owner</th><th>Plan</th><th>Status</th><th>Gross sales</th><th>Est. due</th><th>Last order</th><th></th></tr></thead>
+          <tbody>
+            ${adminBillingData.map(r => `
+              <tr style="${needsFollowUp(r) ? 'background:rgba(166,61,47,0.06)' : ''}">
+                <td><strong>${escapeHtml(r.tenant_name)}</strong></td>
+                <td>${escapeHtml(r.owner_email || '—')}</td>
+                <td><span class="pill ${r.billing_plan==='pro'?'ok':'warn'}">${escapeHtml(r.billing_plan)}</span></td>
+                <td>${r.billing_plan==='pro' ? `<span class="pill ${r.subscription_status==='active'?'ok':'error'}">${escapeHtml(r.subscription_status)}</span>` : '<span class="small">—</span>'}</td>
+                <td>${money(r.gross_sales)} EGP</td>
+                <td>${r.billing_plan==='payg' ? `<strong style="${r.estimated_due>0?'color:var(--error)':''}">${money(r.estimated_due)} EGP</strong>` : '<span class="small">n/a</span>'}</td>
+                <td style="font-family:var(--mono);font-size:11px">${r.last_order_at ? new Date(r.last_order_at).toLocaleDateString() : 'Never'}</td>
+                <td>${needsFollowUp(r) ? `<button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" onclick="openReminderPrompt('${r.tenant_id}','${escapeHtml(r.tenant_name)}',${r.estimated_due})">Follow up</button>` : ''}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>
+  `;
+}
+
+async function openReminderPrompt(tenantId, tenantName, estimatedDue) {
+  const defaultMsg = estimatedDue > 0
+    ? `Hi — your estimated Tabl0 platform fee for this period is ${money(estimatedDue)} EGP. Please make sure your payout account stays in good standing. Reach out here if you have any questions.`
+    : `Hi — we noticed an issue with your Pro subscription payment. Please check your billing details to keep your account active.`;
+  const message = prompt(`Send a payment follow-up to ${tenantName}:`, defaultMsg);
+  if (!message) return;
+  await sb.rpc('admin_send_billing_reminder', { p_tenant_id: tenantId, p_message: message });
+  alert('Reminder sent — it will appear in their Support tab.');
+}
+</script>
+</body>
+</html>  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 8px; }
+  @media (max-width: 800px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
+  .stat-card { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
+  .stat-num { font-size: 26px; font-weight: bold; color: var(--espresso); }
+  .stat-label { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); text-transform: uppercase; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-family: var(--mono); font-size: 11px; text-transform: uppercase; color: var(--ink-soft); padding: 8px; border-bottom: 1px solid var(--line); }
+  td { padding: 10px 8px; border-bottom: 1px dashed var(--line); font-size: 14px; }
+  tr:hover td { background: var(--crema); cursor: pointer; }
+  .pill { font-family: var(--mono); font-size: 10px; padding: 2px 8px; border-radius: 12px; text-transform: uppercase; }
+  .pill.ok { background: rgba(61,107,74,0.12); color: var(--ok); }
+  .pill.warn { background: rgba(192,138,46,0.12); color: var(--gold); }
+  .pill.error { background: rgba(166,61,47,0.12); color: var(--error); }
+  .status-open { background: rgba(192,138,46,0.15); color: var(--gold); }
+  .status-in_progress { background: rgba(45,110,140,0.15); color: var(--info); }
+  .status-resolved { background: rgba(61,107,74,0.15); color: var(--ok); }
+  .empty { padding: 40px 20px; text-align: center; color: var(--ink-soft); font-style: italic; }
+  .center-screen { min-height: 80vh; display: flex; align-items: center; justify-content: center; }
+  .login-card { width: 360px; }
+  input, textarea, select { width: 100%; font-family: Georgia, serif; font-size: 15px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; color: var(--ink); }
+  label { display: block; font-family: var(--mono); font-size: 12px; color: var(--ink-soft); margin: 14px 0 5px; }
+  .msg { font-family: var(--mono); font-size: 13px; padding: 10px 14px; border-radius: var(--radius); margin-bottom: 16px; }
+  .msg.error { background: rgba(166,61,47,0.1); color: var(--error); border: 1px solid rgba(166,61,47,0.3); }
+  .hidden { display: none !important; }
+  .back-link { font-family: var(--mono); font-size: 12px; color: var(--gold); cursor: pointer; text-decoration: underline; margin-bottom: 16px; display: inline-block; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand">Tabl<span>0</span> · Admin</div>
+  <div id="topbar-right"></div>
+</div>
+<div class="wrap" id="app-root"></div>
+
+<script>
+const SUPABASE_URL = 'https://yhrhqfqdxtgifahvkrnw.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_N91RJWdVtL5LgpB7u5uLAA_3NcHqYtt';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let state = {
+  user: null, view: 'loading', isAdmin: false,
+  tab: 'overview', overview: null, tenants: [], tickets: [],
+  detailTenant: null,
+};
+const root = document.getElementById('app-root');
+const topbarRight = document.getElementById('topbar-right');
+
+async function boot() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) { state.user = session.user; await checkAdmin(); }
+  else { state.view = 'login'; render(); }
+}
+boot();
+
+async function checkAdmin() {
+  const { data } = await sb.rpc('get_admin_overview');
+  if (data && !data.error) {
+    state.isAdmin = true;
+    state.overview = data;
+    state.view = 'dashboard';
+    await loadTenants();
+    await loadTickets();
+  } else {
+    state.isAdmin = false;
+    state.view = 'denied';
+  }
+  render();
+}
+
+async function loadTenants() {
+  const { data } = await sb.rpc('get_admin_tenants');
+  state.tenants = data || [];
+}
+async function loadTickets() {
+  const { data } = await sb.rpc('get_admin_support_tickets');
+  state.tickets = data || [];
+}
+
+async function doLogin() {
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  if (!email || !password) return showMsg('Enter both email and password.');
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) return showMsg(error.message);
+  state.user = data.session.user;
+  await checkAdmin();
+}
+function showMsg(text) {
+  const el = document.getElementById('login-msg');
+  if (el) { el.textContent = text; el.classList.remove('hidden'); }
+}
+async function doLogout() { await sb.auth.signOut(); state.user = null; state.view = 'login'; render(); }
+
+function money(n) { return Number(n || 0).toFixed(2); }
+function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+function render() {
+  if (state.view === 'login') return renderLogin();
+  if (state.view === 'denied') return renderDenied();
+  if (state.view === 'dashboard') return renderDashboard();
+  root.innerHTML = '<div class="center-screen">Loading…</div>';
+}
+
+function renderLogin() {
+  topbarRight.innerHTML = '';
+  root.innerHTML = `
+    <div class="center-screen">
+      <div class="ticket login-card">
+        <div class="eyebrow">Platform Admin</div>
+        <h1>Sign in</h1>
+        <p class="lead">Restricted to Tabl0 platform administrators.</p>
+        <div id="login-msg" class="msg error hidden"></div>
+        <label>Email</label><input id="email" type="email" />
+        <label>Password</label><input id="password" type="password" />
+        <button class="btn btn-solid" style="margin-top:18px;width:100%" onclick="doLogin()">Sign in</button>
+      </div>
+    </div>`;
+}
+
+function renderDenied() {
+  topbarRight.innerHTML = `<button class="btn" onclick="doLogout()">Sign out</button>`;
+  root.innerHTML = `
+    <div class="center-screen">
+      <div class="ticket" style="text-align:center;max-width:400px">
+        <h1>Not authorized</h1>
+        <p class="lead">This account (${escapeHtml(state.user.email)}) doesn't have platform admin access.</p>
+      </div>
+    </div>`;
+}
+
+function renderDashboard() {
+  topbarRight.innerHTML = `<span class="userline">${escapeHtml(state.user.email)}</span> <button class="btn" onclick="doLogout()" style="margin-left:12px">Sign out</button>`;
+  root.innerHTML = `
+    <div class="tabs">
+      ${['overview','businesses','support','reports','insights','team','billing','users','customers'].map(t => {
+        const unread = t === 'support' ? state.tickets.filter(tk => !tk.admin_read_at || (tk.updated_at && new Date(tk.updated_at) > new Date(tk.admin_read_at))).length : 0;
+        return `<div class="tab ${state.tab===t?'active':''}" onclick="switchTab('${t}')">${t}${unread > 0 ? ` <span class="pill error" style="margin-left:4px">${unread}</span>` : ''}</div>`;
+      }).join('')}
+    </div>
+    <div id="tab-body"></div>`;
+  const body = document.getElementById('tab-body');
+  if (state.tab === 'overview') body.innerHTML = renderOverview();
+  if (state.tab === 'businesses') body.innerHTML = state.detailTenant ? renderTenantDetail() : renderBusinesses();
+  if (state.tab === 'support') body.innerHTML = renderSupport();
+  if (state.tab === 'reports') renderReportsTab();
+  if (state.tab === 'insights') renderInsightsTab();
+  if (state.tab === 'team') { renderTeamTab(); loadPlatformAdmins(); }
+  if (state.tab === 'billing') { renderAdminBillingTab(); loadAdminBilling(); }
+  if (state.tab === 'users') { renderAdminUsersTab(); loadAdminUsers(); }
+  if (state.tab === 'customers') { renderAdminCustomersTab(); loadAdminCustomers(); }
+}
+async function switchTab(t) {
+  state.tab = t; state.detailTenant = null;
+  if (t === 'support') {
+    await loadTickets();
+    await sb.rpc('mark_admin_tickets_read');
+    await loadTickets(); // refresh with updated admin_read_at so the badge clears
+  }
+  render();
+}
+
+function renderOverview() {
+  const o = state.overview;
+  return `
+    <div class="ticket">
+      <h2>Platform overview</h2>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-num">${o.total_tenants}</div><div class="stat-label">Registered businesses</div></div>
+        <div class="stat-card"><div class="stat-num">${o.active_tenants}</div><div class="stat-label">Active</div></div>
+        <div class="stat-card"><div class="stat-num">${o.new_tenants_last_7_days}</div><div class="stat-label">New this week</div></div>
+        <div class="stat-card"><div class="stat-num">${o.total_customers}</div><div class="stat-label">Total customers</div></div>
+        <div class="stat-card"><div class="stat-num">${o.orders_today}</div><div class="stat-label">Orders today</div></div>
+        <div class="stat-card"><div class="stat-num">${money(o.revenue_today)} EGP</div><div class="stat-label">Revenue today</div></div>
+        <div class="stat-card"><div class="stat-num">${o.orders_last_7_days}</div><div class="stat-label">Orders, 7 days</div></div>
+        <div class="stat-card"><div class="stat-num">${money(o.total_revenue_all_time)} EGP</div><div class="stat-label">All-time revenue</div></div>
+        <div class="stat-card"><div class="stat-num">${o.total_orders_all_time}</div><div class="stat-label">All-time orders</div></div>
+        <div class="stat-card"><div class="stat-num">${o.tenants_with_payouts_verified}</div><div class="stat-label">Payouts verified</div></div>
+        <div class="stat-card"><div class="stat-num">${o.tenants_with_loyalty_enabled}</div><div class="stat-label">Loyalty enabled</div></div>
+        <div class="stat-card"><div class="stat-num">${o.open_support_tickets}</div><div class="stat-label">Open support tickets</div></div>
+      </div>
+    </div>`;
+}
+
+function renderBusinesses() {
+  const gatewayLabels = { paymob: 'Paymob', kashier: 'Kashier', paytabs: 'PayTabs', fawry: 'Fawry', stripe: 'Stripe' };
+  return `
+    <div class="ticket">
+      <h2>Registered businesses (${state.tenants.length})</h2>
+      ${state.tenants.length === 0 ? '<div class="empty">No businesses registered yet.</div>' : `
+        <table>
+          <thead><tr><th>Name</th><th>Owner</th><th>Orders</th><th>Revenue</th><th>Payment Gateway</th><th>Status</th><th>Joined</th></tr></thead>
+          <tbody>
+            ${state.tenants.map(t => `
+              <tr onclick="openTenantDetail('${t.id}')">
+                <td><strong>${escapeHtml(t.name)}</strong><br><span style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${escapeHtml(t.slug)}</span></td>
+                <td>${escapeHtml(t.owner_email || '—')}</td>
+                <td>${t.order_count}</td>
+                <td>${money(t.total_revenue)} ${escapeHtml(t.currency)}</td>
+                <td>${t.payment_gateway_status === 'configured' ? `<span class="pill ok">${escapeHtml(gatewayLabels[t.payment_gateway_provider] || t.payment_gateway_provider)}</span>` : '<span class="pill warn">Pay at counter</span>'}</td>
+                <td><span class="pill ${t.active?'ok':'error'}">${t.active?'active':'inactive'}</span></td>
+                <td style="font-family:var(--mono);font-size:12px">${new Date(t.created_at).toLocaleDateString()}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>`;
+}
+
+async function openTenantDetail(id) {
+  const { data } = await sb.rpc('get_admin_tenant_detail', { p_tenant_id: id });
+  state.detailTenant = data;
+  render();
+}
+function backToBusinesses() { state.detailTenant = null; render(); }
+
+function renderTenantDetail() {
+  const d = state.detailTenant;
+  const t = d.tenant;
+  return `
+    <div class="ticket">
+      <span class="back-link" onclick="backToBusinesses()">← All businesses</span>
+      <h1>${escapeHtml(t.name)}</h1>
+      <p class="lead">${escapeHtml(t.slug)} · Owner: ${escapeHtml(d.owner_email || '—')} · Joined ${new Date(t.created_at).toLocaleDateString()}</p>
+
+      <h2 style="margin-top:24px">Staff (${d.staff.length})</h2>
+      ${d.staff.length === 0 ? '<div class="small">No staff added</div>' : d.staff.map(s => `
+        <div style="padding:6px 0;border-bottom:1px dashed var(--line)">${escapeHtml(s.email)} <span class="pill warn">${escapeHtml(s.role)}</span></div>
+      `).join('')}
+
+      <h2 style="margin-top:24px">Recent orders (${d.recent_orders.length})</h2>
+      ${d.recent_orders.length === 0 ? '<div class="small">No orders yet</div>' : `
+        <table>
+          <thead><tr><th>Order</th><th>Status</th><th>Total</th><th>Date</th></tr></thead>
+          <tbody>
+            ${d.recent_orders.map(o => `
+              <tr><td style="font-family:var(--mono);font-size:12px">#${o.id.slice(0,8)}</td>
+                  <td><span class="pill ok">${escapeHtml(o.status)}</span></td>
+                  <td>${money(o.total)} EGP</td>
+                  <td style="font-family:var(--mono);font-size:12px">${new Date(o.created_at).toLocaleString()}</td></tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>`;
+}
+
+function renderSupport() {
+  return `
+    <div class="ticket">
+      <h2>Support tickets (${state.tickets.length})</h2>
+      ${state.tickets.length === 0 ? '<div class="empty">No support tickets yet.</div>' : state.tickets.map(tk => `
+        <div style="border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:14px;background:#fff">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <strong>${escapeHtml(tk.subject)}</strong>
+            <span class="pill status-${tk.status}">${escapeHtml(tk.status.replace('_',' '))}</span>
+          </div>
+          <div class="small" style="margin-bottom:8px">${escapeHtml(tk.tenant_name)} · ${escapeHtml(tk.created_by_email || '')} · ${new Date(tk.created_at).toLocaleString()}</div>
+          <p style="margin-bottom:12px">${escapeHtml(tk.message)}</p>
+          ${tk.admin_response ? `<div style="background:var(--crema);padding:10px;border-radius:var(--radius);margin-bottom:10px"><strong>Response:</strong> ${escapeHtml(tk.admin_response)}</div>` : ''}
+          <div class="row" style="display:flex;gap:8px">
+            <input id="resp-${tk.id}" placeholder="Write a response…" value="${escapeHtml(tk.admin_response||'')}" style="flex:1"/>
+            <select id="status-${tk.id}" style="flex:0 0 140px">
+              <option value="open" ${tk.status==='open'?'selected':''}>Open</option>
+              <option value="in_progress" ${tk.status==='in_progress'?'selected':''}>In progress</option>
+              <option value="resolved" ${tk.status==='resolved'?'selected':''}>Resolved</option>
+            </select>
+            <button class="btn btn-sm btn-solid" onclick="respondToTicket('${tk.id}')">Save</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>`;
+}
+async function respondToTicket(id) {
+  const response = document.getElementById('resp-' + id).value;
+  const status = document.getElementById('status-' + id).value;
+  await sb.rpc('admin_respond_to_ticket', { p_ticket_id: id, p_response: response, p_status: status });
+  await loadTickets();
+  render();
+}
+
+// ============================================================
+// PLATFORM-WIDE REPORTS
+// ============================================================
+let adminReportState = { rangeLabel: 'Today', start: null, end: null, orders: [], loaded: false, tenantFilter: '' };
+
+function setAdminReportRange(label) {
+  const now = new Date();
+  let start, end;
+  if (label === 'Today') { start = new Date(now.getFullYear(), now.getMonth(), now.getDate()); end = new Date(start); end.setDate(end.getDate()+1); }
+  else if (label === 'This Week') { const d = now.getDay(); start = new Date(now.getFullYear(), now.getMonth(), now.getDate()-d); end = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1); }
+  else if (label === 'This Month') { start = new Date(now.getFullYear(), now.getMonth(), 1); end = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1); }
+  else if (label === 'This Year') { start = new Date(now.getFullYear(), 0, 1); end = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1); }
+  adminReportState.rangeLabel = label; adminReportState.start = start; adminReportState.end = end;
+  generateAdminReport();
+}
+function toDatetimeLocalValue(d) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function applyCustomAdminReportRange() {
+  const s = document.getElementById('admin-report-start').value, e = document.getElementById('admin-report-end').value;
+  if (!s || !e) return;
+  adminReportState.rangeLabel = 'Custom range'; adminReportState.start = new Date(s); adminReportState.end = new Date(e);
+  generateAdminReport();
+}
+async function generateAdminReport() {
+  adminReportState.loaded = false;
+  renderReportsTab();
+  const { data } = await sb.rpc('get_admin_orders_report', {
+    p_start: adminReportState.start.toISOString(), p_end: adminReportState.end.toISOString(), p_tenant_id: null
+  });
+  adminReportState.orders = data || [];
+  adminReportState.loaded = true;
+  renderReportsTab();
+}
+function computeAdminStats(orders) {
+  const valid = orders.filter(o => o.status !== 'cancelled');
+  const grossSales = valid.reduce((s,o) => s + Number(o.subtotal||0), 0);
+  const totalDiscounts = valid.reduce((s,o) => s + Number(o.reward_discount||0), 0);
+  const netSales = valid.reduce((s,o) => s + Number(o.total||0), 0);
+  const byTenant = {};
+  valid.forEach(o => {
+    if (!byTenant[o.tenant_name]) byTenant[o.tenant_name] = { name: o.tenant_name, orders: 0, revenue: 0 };
+    byTenant[o.tenant_name].orders += 1;
+    byTenant[o.tenant_name].revenue += Number(o.total||0);
+  });
+  const methodLabels = { counter: 'Pay at counter', paymob: 'Paymob', kashier: 'Kashier', paytabs: 'PayTabs', fawry: 'Fawry', stripe: 'Stripe' };
+  const byMethod = {};
+  valid.forEach(o => {
+    const method = o.payment_method || 'counter';
+    if (!byMethod[method]) byMethod[method] = { method, label: methodLabels[method] || method, count: 0, total: 0 };
+    byMethod[method].count += 1;
+    byMethod[method].total += Number(o.total||0);
+  });
+  return { grossSales, totalDiscounts, netSales, orderCount: valid.length, avgOrderValue: valid.length ? netSales/valid.length : 0,
+    cancelledCount: orders.length - valid.length, byTenant: Object.values(byTenant).sort((a,b)=>b.revenue-a.revenue),
+    byMethod: Object.values(byMethod).sort((a,b)=>b.total-a.total) };
+}
+function renderReportsTab() {
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+  if (!adminReportState.start) { setAdminReportRange('Today'); return; }
+  const stats = adminReportState.loaded ? computeAdminStats(adminReportState.orders) : null;
+  body.innerHTML = `
+    <div class="ticket">
+      <h2>Platform-wide report</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${['Today','This Week','This Month','This Year'].map(l => `<button class="btn btn-sm ${adminReportState.rangeLabel===l?'btn-solid':''}" onclick="setAdminReportRange('${l}')">${l}</button>`).join('')}
+      </div>
+      <hr style="border:none;border-top:1px dashed var(--line);margin:16px 0"/>
+      <div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap">
+        <div><label>From</label><input id="admin-report-start" type="datetime-local" value="${adminReportState.start?toDatetimeLocalValue(adminReportState.start):''}"/></div>
+        <div><label>To</label><input id="admin-report-end" type="datetime-local" value="${adminReportState.end?toDatetimeLocalValue(adminReportState.end):''}"/></div>
+        <button class="btn btn-sm" onclick="applyCustomAdminReportRange()">Apply</button>
+      </div>
+    </div>
+    ${!adminReportState.loaded ? '<div class="ticket"><div class="empty">Generating…</div></div>' : `
+      <div class="ticket">
+        <h2>${escapeHtml(adminReportState.rangeLabel)}</h2>
+        <div class="stat-grid">
+          <div class="stat-card"><div class="stat-num">${money(stats.grossSales)}</div><div class="stat-label">Gross sales (EGP)</div></div>
+          <div class="stat-card"><div class="stat-num">${money(stats.netSales)}</div><div class="stat-label">Net sales (EGP)</div></div>
+          <div class="stat-card"><div class="stat-num">${stats.orderCount}</div><div class="stat-label">Orders</div></div>
+          <div class="stat-card"><div class="stat-num">${money(stats.avgOrderValue)}</div><div class="stat-label">Avg order value</div></div>
+        </div>
+        <div style="text-align:right;margin-top:12px">
+          <button class="btn btn-sm" onclick="exportAdminReportExcel()">📊 Export Excel</button>
+          <button class="btn btn-sm" onclick="exportAdminReportPdf()">📄 Export PDF</button>
+        </div>
+      </div>
+      <div class="ticket">
+        <h2>Revenue by business</h2>
+        <table><thead><tr><th>Business</th><th>Orders</th><th>Revenue</th></tr></thead>
+        <tbody>${stats.byTenant.map(t => `<tr><td>${escapeHtml(t.name)}</td><td>${t.orders}</td><td>${money(t.revenue)} EGP</td></tr>`).join('')}</tbody></table>
+      </div>
+      <div class="ticket">
+        <h2>Payment methods, platform-wide</h2>
+        <p class="lead">Which gateways cafés are actually using — real adoption, not just who's connected one.</p>
+        <table><thead><tr><th>Method</th><th>Orders</th><th>Total</th></tr></thead>
+        <tbody>${stats.byMethod.map(m => `<tr><td>${escapeHtml(m.label)}</td><td>${m.count}</td><td>${money(m.total)} EGP</td></tr>`).join('')}</tbody></table>
+      </div>
+    `}
+  `;
+}
+function exportAdminReportExcel() {
+  const stats = computeAdminStats(adminReportState.orders);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['Tabl0 Platform Report'], ['Range', adminReportState.rangeLabel],
+    ['From', adminReportState.start.toLocaleString()], ['To', adminReportState.end.toLocaleString()],
+    [], ['Gross Sales (EGP)', stats.grossSales.toFixed(2)], ['Net Sales (EGP)', stats.netSales.toFixed(2)],
+    ['Order Count', stats.orderCount], ['Average Order Value', stats.avgOrderValue.toFixed(2)]
+  ]), 'Summary');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Business','Orders','Revenue (EGP)'], ...stats.byTenant.map(t=>[t.name,t.orders,t.revenue.toFixed(2)])]), 'By Business');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Payment Method','Orders','Total (EGP)'], ...stats.byMethod.map(m=>[m.label,m.count,m.total.toFixed(2)])]), 'Payment Methods');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['Order ID','Business','Table','Status','Payment Method','Payment Reference','Subtotal','Discount','Total','Date'],
+    ...adminReportState.orders.map(o => [o.id, o.tenant_name, o.table_code||'', o.status, o.payment_method||'counter', o.payment_reference||'', Number(o.subtotal||0).toFixed(2), Number(o.reward_discount||0).toFixed(2), Number(o.total||0).toFixed(2), new Date(o.created_at).toLocaleString()])
+  ]), 'Order Detail');
+  XLSX.writeFile(wb, `Tabl0_Platform_Report_${adminReportState.rangeLabel.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+function exportAdminReportPdf() {
+  const stats = computeAdminStats(adminReportState.orders);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(16); doc.text('Tabl0 Platform Report', 14, 18);
+  doc.setFontSize(10); doc.text(`Range: ${adminReportState.rangeLabel}`, 14, 26);
+  doc.autoTable({ startY: 34, head: [['Metric','Value']], body: [
+    ['Gross sales', money(stats.grossSales)+' EGP'], ['Net sales', money(stats.netSales)+' EGP'],
+    ['Order count', String(stats.orderCount)], ['Average order value', money(stats.avgOrderValue)+' EGP']
+  ], theme: 'grid', headStyles: { fillColor: [43,29,20] } });
+  doc.autoTable({ startY: doc.lastAutoTable.finalY+10, head: [['Business','Orders','Revenue']],
+    body: stats.byTenant.map(t=>[t.name,t.orders,money(t.revenue)]), theme: 'striped', headStyles: { fillColor: [43,29,20] } });
+  doc.autoTable({ startY: doc.lastAutoTable.finalY+10, head: [['Payment Method','Orders','Total']],
+    body: stats.byMethod.map(m=>[m.label,m.count,money(m.total)]), theme: 'grid', headStyles: { fillColor: [43,29,20] } });
+  doc.save(`Tabl0_Platform_Report_${adminReportState.rangeLabel.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.pdf`);
+}
+
+// ============================================================
+// INSIGHTS — market study: item performance, café comparison,
+// and consumer behavior (variant/preference popularity)
+// ============================================================
+let insightsState = { rangeLabel: 'This Month', start: null, end: null, data: null, loaded: false };
+let chartInstances = {}; // track so we can destroy before re-drawing — Chart.js silently fails to redraw an already-bound canvas otherwise
+
+function setInsightsRange(label) {
+  const now = new Date();
+  let start, end;
+  if (label === 'This Week') { const d = now.getDay(); start = new Date(now.getFullYear(), now.getMonth(), now.getDate()-d); end = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1); }
+  else if (label === 'This Month') { start = new Date(now.getFullYear(), now.getMonth(), 1); end = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1); }
+  else if (label === 'This Year') { start = new Date(now.getFullYear(), 0, 1); end = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1); }
+  else if (label === 'All Time') { start = new Date(2020,0,1); end = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1); }
+  insightsState.rangeLabel = label; insightsState.start = start; insightsState.end = end;
+  generateInsights();
+}
+
+async function generateInsights() {
+  insightsState.loaded = false;
+  renderInsightsTab();
+  const { data } = await sb.rpc('get_admin_market_analytics', {
+    p_start: insightsState.start.toISOString(), p_end: insightsState.end.toISOString()
+  });
+  insightsState.data = data;
+  insightsState.loaded = true;
+  renderInsightsTab();
+}
+
+function destroyChart(id) { if (chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; } }
+
+function renderInsightsTab() {
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+  if (!insightsState.start) { setInsightsRange('This Month'); return; }
+
+  body.innerHTML = `
+    <div class="ticket">
+      <h2>Market study</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${['This Week','This Month','This Year','All Time'].map(l => `<button class="btn btn-sm ${insightsState.rangeLabel===l?'btn-solid':''}" onclick="setInsightsRange('${l}')">${l}</button>`).join('')}
+      </div>
+    </div>
+    ${!insightsState.loaded ? '<div class="ticket"><div class="empty">Crunching numbers…</div></div>' : `
+      <div class="ticket">
+        <div class="nav-actions" style="margin-bottom:0">
+          <h2 style="border:none;margin:0">Café comparison — who's selling more</h2>
+          <div><button class="btn btn-sm" onclick="exportInsightsExcel()">📊 Excel</button> <button class="btn btn-sm" onclick="exportInsightsPdf()">📄 PDF</button></div>
+        </div>
+        ${insightsState.data.tenant_comparison.length === 0 ? '<div class="empty">No orders in this range.</div>' : '<canvas id="chart-tenant-comparison" height="90"></canvas>'}
+      </div>
+
+      <div class="ticket">
+        <h2>Best & worst selling drinks (platform-wide)</h2>
+        ${insightsState.data.items_global.length === 0 ? '<div class="empty">No items sold in this range.</div>' : '<canvas id="chart-items-global" height="110"></canvas>'}
+      </div>
+
+      <div class="stat-grid" style="grid-template-columns:1fr 1fr">
+        <div class="ticket">
+          <h2>Hot vs cold — consumer preference</h2>
+          ${insightsState.data.category_breakdown.length === 0 ? '<div class="empty">No category data.</div>' : '<canvas id="chart-category"></canvas>'}
+        </div>
+        <div class="ticket">
+          <h2>Variant preferences (size, milk, cup type…)</h2>
+          ${insightsState.data.variant_popularity.length === 0 ? '<div class="empty">No variant selections in this range — items without required options do not generate this data.</div>' : '<canvas id="chart-variants"></canvas>'}
+        </div>
+      </div>
+
+      <div class="ticket">
+        <h2>Item performance by café</h2>
+        <table>
+          <thead><tr><th>Café</th><th>Item</th><th>Qty sold</th><th>Revenue</th></tr></thead>
+          <tbody>${insightsState.data.items_by_tenant.sort((a,b)=>b.qty-a.qty).map(i => `<tr><td>${escapeHtml(i.tenant_name)}</td><td>${escapeHtml(i.item_name)}</td><td>${i.qty}</td><td>${money(i.revenue)} EGP</td></tr>`).join('')}</tbody>
+        </table>
+      </div>
+    `}
+  `;
+
+  if (insightsState.loaded) drawInsightsCharts();
+}
+
+function chartColors(n) {
+  const palette = ['#C08A2E','#3D6B4A','#2D6E8C','#A63D2F','#6B5B47','#D9A44C','#2B1D14','#7a9e85'];
+  return Array.from({length:n}, (_,i) => palette[i % palette.length]);
+}
+
+function drawInsightsCharts() {
+  const d = insightsState.data;
+
+  if (d.tenant_comparison.length > 0) {
+    destroyChart('tenant-comparison');
+    chartInstances['tenant-comparison'] = new Chart(document.getElementById('chart-tenant-comparison'), {
+      type: 'bar',
+      data: {
+        labels: d.tenant_comparison.map(t => t.tenant_name),
+        datasets: [
+          { label: 'Revenue (EGP)', data: d.tenant_comparison.map(t => t.revenue), backgroundColor: '#C08A2E', yAxisID: 'y' },
+          { label: 'Order count', data: d.tenant_comparison.map(t => t.order_count), backgroundColor: '#2D6E8C', yAxisID: 'y1' }
+        ]
+      },
+      options: { responsive: true, scales: {
+        y: { position: 'left', title: { display: true, text: 'Revenue (EGP)' } },
+        y1: { position: 'right', title: { display: true, text: 'Orders' }, grid: { drawOnChartArea: false } }
+      }}
+    });
+  }
+
+  if (d.items_global.length > 0) {
+    destroyChart('items-global');
+    const sorted = [...d.items_global].sort((a,b) => b.qty - a.qty);
+    chartInstances['items-global'] = new Chart(document.getElementById('chart-items-global'), {
+      type: 'bar',
+      data: { labels: sorted.map(i => i.item_name), datasets: [{ label: 'Quantity sold', data: sorted.map(i => i.qty), backgroundColor: chartColors(sorted.length) }] },
+      options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } } }
+    });
+  }
+
+  if (d.category_breakdown.length > 0) {
+    destroyChart('category');
+    chartInstances['category'] = new Chart(document.getElementById('chart-category'), {
+      type: 'pie',
+      data: { labels: d.category_breakdown.map(c => c.category_name || 'Uncategorized'), datasets: [{ data: d.category_breakdown.map(c => c.qty), backgroundColor: chartColors(d.category_breakdown.length) }] },
+      options: { responsive: true }
+    });
+  }
+
+  if (d.variant_popularity.length > 0) {
+    destroyChart('variants');
+    chartInstances['variants'] = new Chart(document.getElementById('chart-variants'), {
+      type: 'doughnut',
+      data: { labels: d.variant_popularity.map(v => v.option_name), datasets: [{ data: d.variant_popularity.map(v => v.times_selected), backgroundColor: chartColors(d.variant_popularity.length) }] },
+      options: { responsive: true }
+    });
+  }
+}
+
+function exportInsightsExcel() {
+  const d = insightsState.data;
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Tabl0 Market Study'], ['Range', insightsState.rangeLabel]]), 'Summary');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Café','Orders','Revenue (EGP)'], ...d.tenant_comparison.map(t=>[t.tenant_name,t.order_count,t.revenue.toFixed(2)])]), 'Cafe Comparison');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Item','Qty Sold','Revenue (EGP)','Order Count'], ...d.items_global.map(i=>[i.item_name,i.qty,i.revenue.toFixed(2),i.order_count])]), 'Item Performance');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Café','Item','Qty Sold','Revenue (EGP)'], ...d.items_by_tenant.map(i=>[i.tenant_name,i.item_name,i.qty,i.revenue.toFixed(2)])]), 'Item by Cafe');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Category','Qty Sold','Revenue (EGP)'], ...d.category_breakdown.map(c=>[c.category_name||'Uncategorized',c.qty,c.revenue.toFixed(2)])]), 'Hot vs Cold');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Variant Option','Times Selected'], ...d.variant_popularity.map(v=>[v.option_name,v.times_selected])]), 'Variant Preferences');
+  XLSX.writeFile(wb, `Tabl0_Market_Study_${insightsState.rangeLabel.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+function exportInsightsPdf() {
+  const d = insightsState.data;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(16); doc.text('Tabl0 Market Study', 14, 18);
+  doc.setFontSize(10); doc.text(`Range: ${insightsState.rangeLabel}`, 14, 26);
+  doc.autoTable({ startY: 34, head: [['Café','Orders','Revenue (EGP)']], body: d.tenant_comparison.map(t=>[t.tenant_name,t.order_count,money(t.revenue)]), theme: 'grid', headStyles: { fillColor: [43,29,20] } });
+  doc.autoTable({ startY: doc.lastAutoTable.finalY+10, head: [['Item','Qty Sold','Revenue (EGP)']], body: d.items_global.map(i=>[i.item_name,i.qty,money(i.revenue)]), theme: 'striped', headStyles: { fillColor: [43,29,20] } });
+  doc.autoTable({ startY: doc.lastAutoTable.finalY+10, head: [['Category','Qty Sold']], body: d.category_breakdown.map(c=>[c.category_name||'Uncategorized',c.qty]), theme: 'grid', headStyles: { fillColor: [43,29,20] } });
+  doc.autoTable({ startY: doc.lastAutoTable.finalY+10, head: [['Variant Preference','Times Selected']], body: d.variant_popularity.map(v=>[v.option_name,v.times_selected]), theme: 'striped', headStyles: { fillColor: [43,29,20] } });
+  doc.save(`Tabl0_Market_Study_${insightsState.rangeLabel.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.pdf`);
+}
+
+// ============================================================
+// TEAM — manage who has platform admin access
+// ============================================================
+let platformAdmins = [];
+async function loadPlatformAdmins() {
+  const { data } = await sb.rpc('get_platform_admins');
+  platformAdmins = data || [];
+  renderTeamTab();
+}
+function renderTeamTab() {
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="ticket">
+      <h2>Platform admins</h2>
+      <p class="lead">Anyone listed here can see every business's data, orders, and revenue across the platform. Only add people you fully trust with that access.</p>
+      <div id="team-msg" class="msg hidden"></div>
+      <div class="row">
+        <div><label>Add by email</label><input id="new-admin-email" placeholder="colleague@example.com"/></div>
+        <div style="flex:0 0 auto"><button class="btn btn-sm btn-solid" style="margin-top:14px" onclick="addAdmin()">Grant admin access</button></div>
+      </div>
+      <p class="small" style="margin-top:6px">They must already have a Tabl0 account (signed up via the café console or elsewhere) — this doesn't create a new account, only grants access to an existing one.</p>
+    </div>
+    <div class="ticket">
+      <h2>Current admins (${platformAdmins.length})</h2>
+      ${platformAdmins.map(a => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px dashed var(--line)">
+          <div>
+            <strong>${escapeHtml(a.email)}</strong>
+            ${a.user_id === state.user.id ? '<span class="pill ok" style="margin-left:8px">You</span>' : ''}
+            <div class="small">Added ${new Date(a.added_at).toLocaleDateString()}</div>
+          </div>
+          ${a.user_id === state.user.id ? '' : `<button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" onclick="removeAdmin('${a.user_id}','${escapeHtml(a.email)}')">Remove access</button>`}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+async function addAdmin() {
+  const email = document.getElementById('new-admin-email').value.trim();
+  if (!email) return;
+  const { data, error } = await sb.rpc('add_platform_admin', { p_email: email });
+  if (error || (data && data.error)) {
+    const msg = (data && data.error === 'no_account_found')
+      ? 'No Tabl0 account exists with that email yet — they need to sign up first (e.g. via the café console), then you can grant them admin access.'
+      : 'Something went wrong.';
+    document.getElementById('team-msg').textContent = msg;
+    document.getElementById('team-msg').className = 'msg error';
+    return;
+  }
+  await loadPlatformAdmins();
+}
+async function removeAdmin(userId, email) {
+  if (!confirm(`Remove platform admin access for ${email}?`)) return;
+  await sb.rpc('remove_platform_admin', { p_user_id: userId });
+  await loadPlatformAdmins();
+}
+
+// ============================================================
+// USERS — platform-wide directory: every account, who owns/staffs what,
+// and a way to trigger a password reset on someone's behalf.
+// ============================================================
+let adminUsersData = [];
+let adminUsersSearch = '';
+
+async function loadAdminUsers() {
+  const { data } = await sb.rpc('get_admin_users');
+  adminUsersData = data || [];
+  renderAdminUsersTab();
+  loadOrphanedAccounts();
+}
+
+function renderAdminUsersTab() {
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+
+  const filtered = adminUsersData.filter(u => !adminUsersSearch || u.email.toLowerCase().includes(adminUsersSearch.toLowerCase()));
+
+  body.innerHTML = `
+    <div class="ticket">
+      <h2>All users (${adminUsersData.length})</h2>
+      <input id="user-search" placeholder="Search by email…" value="${escapeHtml(adminUsersSearch)}" oninput="filterAdminUsers(this.value)" style="margin-bottom:16px"/>
+      ${filtered.length === 0 ? '<div class="empty">No users found.</div>' : `
+        <table>
+          <thead><tr><th>Email</th><th>Role(s)</th><th>Status</th><th>Last sign-in</th><th>Joined</th><th></th></tr></thead>
+          <tbody>
+            ${filtered.map(u => `
+              <tr>
+                <td><strong>${escapeHtml(u.email)}</strong></td>
+                <td>
+                  ${(u.owns || []).map(o => `<span class="pill ok" style="margin-right:4px">Owner: ${escapeHtml(o.tenant_name)}</span>`).join('')}
+                  ${(u.staff_of || []).map(s => `<span class="pill warn" style="margin-right:4px">${escapeHtml(s.role)}: ${escapeHtml(s.tenant_name)}</span>`).join('')}
+                  ${!u.owns && !u.staff_of ? '<span class="small">No café affiliation</span>' : ''}
+                </td>
+                <td><span class="pill ${u.confirmed ? 'ok' : 'warn'}">${u.confirmed ? 'confirmed' : 'pending'}</span></td>
+                <td style="font-family:var(--mono);font-size:11px">${u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleDateString() : 'Never'}</td>
+                <td style="font-family:var(--mono);font-size:11px">${new Date(u.created_at).toLocaleDateString()}</td>
+                <td>
+                  <button class="btn btn-sm" onclick="triggerPasswordReset('${escapeHtml(u.email)}')">Reset password</button>
+                  <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" onclick="deleteUserAccount('${u.user_id}','${escapeHtml(u.email)}')">Delete account</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>
+    <div class="ticket" id="orphaned-accounts-section">
+      <h2>Accounts with no café affiliation</h2>
+      <p class="lead">Accounts that used to belong to a café (e.g. removed kitchen staff) but no longer do. They still exist and will block re-inviting the same email until deleted here.</p>
+      <div id="orphaned-list" class="small">Loading…</div>
+    </div>
+  `;
+}
+
+async function loadOrphanedAccounts() {
+  const { data } = await sb.rpc('get_orphaned_accounts');
+  const list = document.getElementById('orphaned-list');
+  if (!list) return;
+  const accounts = data || [];
+  if (accounts.length === 0) { list.innerHTML = '<div class="empty">None — every account is currently affiliated with a café.</div>'; return; }
+  list.innerHTML = accounts.map(a => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px dashed var(--line)">
+      <div><strong>${escapeHtml(a.email)}</strong><div class="small">Joined ${new Date(a.created_at).toLocaleDateString()} · Last sign-in ${a.last_sign_in_at ? new Date(a.last_sign_in_at).toLocaleDateString() : 'Never'}</div></div>
+      <button class="btn btn-sm" style="color:var(--error);border-color:var(--error)" onclick="deleteUserAccount('${a.user_id}','${escapeHtml(a.email)}')">Delete account</button>
+    </div>
+  `).join('');
+}
+
+function filterAdminUsers(value) {
+  adminUsersSearch = value;
+  renderAdminUsersTab();
+}
+
+async function triggerPasswordReset(email) {
+  if (!confirm(`Send a password reset email to ${email}?`)) return;
+  const { error } = await sb.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin + '/console.html'
+  });
+  if (error) { alert('Could not send reset email: ' + error.message); return; }
+  alert(`Password reset email sent to ${email}.`);
+}
+
+async function deleteUserAccount(userId, email) {
+  const typed = prompt(`This permanently deletes ${email}'s entire Tabl0 account — not just café access, the whole account. This cannot be undone.\n\nType the email exactly to confirm:`);
+  if (typed !== email) {
+    if (typed !== null) alert('Email didn\'t match — nothing was deleted.');
+    return;
+  }
+  const { data: { session } } = await sb.auth.getSession();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-delete-user`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target_user_id: userId })
+  });
+  const data = await res.json();
+  if (data.error) { alert('Could not delete account: ' + data.error); return; }
+  alert(`${email}'s account has been deleted.`);
+  await loadAdminUsers();
+}
+
+// ============================================================
+// CUSTOMERS — platform-wide, phone-verified loyalty customers.
+// Deliberately separate from Users (café owners/staff). These are two
+// different account types that happen to share the same auth system —
+// a customer never has business/admin access, and a business account
+// (owner/staff) is never listed here even if they've also ordered as a
+// customer somewhere.
+// ============================================================
+let adminCustomersData = [];
+let adminCustomersSearch = '';
+
+async function loadAdminCustomers() {
+  const { data } = await sb.rpc('get_admin_customers');
+  adminCustomersData = data || [];
+  renderAdminCustomersTab();
+}
+
+function renderAdminCustomersTab() {
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+
+  const filtered = adminCustomersData.filter(c =>
+    !adminCustomersSearch ||
+    c.phone_number.includes(adminCustomersSearch) ||
+    (c.display_name && c.display_name.toLowerCase().includes(adminCustomersSearch.toLowerCase()))
+  );
+
+  const totalOrders = adminCustomersData.reduce((s, c) => s + c.total_orders, 0);
+  const totalSpent = adminCustomersData.reduce((s, c) => s + Number(c.total_spent), 0);
+  const multiCafe = adminCustomersData.filter(c => c.cafes_ordered_from && c.cafes_ordered_from.length > 1).length;
+
+  body.innerHTML = `
+    <div class="ticket">
+      <h2>Customers</h2>
+      <p class="lead">Phone-verified loyalty customers, platform-wide — separate from café owners/staff (see Users tab). This shows their activity across every café, which a single café's own dashboard never sees.</p>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-num">${adminCustomersData.length}</div><div class="stat-label">Total customers</div></div>
+        <div class="stat-card"><div class="stat-num">${totalOrders}</div><div class="stat-label">Orders, all-time</div></div>
+        <div class="stat-card"><div class="stat-num">${money(totalSpent)}</div><div class="stat-label">Spent, all-time (EGP)</div></div>
+        <div class="stat-card"><div class="stat-num">${multiCafe}</div><div class="stat-label">Order from 2+ cafés</div></div>
+      </div>
+    </div>
+    <div class="ticket">
+      <h2>All customers (${adminCustomersData.length})</h2>
+      <input id="customer-search" placeholder="Search by name or phone…" value="${escapeHtml(adminCustomersSearch)}" oninput="filterAdminCustomers(this.value)" style="margin-bottom:16px"/>
+      ${filtered.length === 0 ? '<div class="empty">No customers found.</div>' : `
+        <table>
+          <thead><tr><th>Customer</th><th>Cafés ordered from</th><th>Orders</th><th>Spent</th><th>Last order</th><th>Joined</th></tr></thead>
+          <tbody>
+            ${filtered.map(c => `
+              <tr>
+                <td><strong>${escapeHtml(c.display_name || 'No name given')}</strong><br><span class="small">${escapeHtml(c.phone_number)}</span></td>
+                <td>${(c.cafes_ordered_from || []).map(name => `<span class="pill warn" style="margin-right:4px">${escapeHtml(name)}</span>`).join('') || '<span class="small">None yet</span>'}</td>
+                <td>${c.total_orders}</td>
+                <td>${money(c.total_spent)} EGP</td>
+                <td style="font-family:var(--mono);font-size:11px">${c.last_order_at ? new Date(c.last_order_at).toLocaleDateString() : '—'}</td>
+                <td style="font-family:var(--mono);font-size:11px">${new Date(c.created_at).toLocaleDateString()}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>
+  `;
+}
+
+function filterAdminCustomers(value) {
+  adminCustomersSearch = value;
+  renderAdminCustomersTab();
+}
+// PLATFORM BILLING — who's on which plan, who owes what, follow-up
+// ============================================================
+let adminBillingData = [];
+let adminBillingPeriod = 'This Month';
+
+function setAdminBillingPeriod(label) {
+  adminBillingPeriod = label;
+  loadAdminBilling();
+}
+
+async function loadAdminBilling() {
+  const now = new Date();
+  let start, end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  if (adminBillingPeriod === 'This Month') start = new Date(now.getFullYear(), now.getMonth(), 1);
+  else if (adminBillingPeriod === 'Last Month') {
+    start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    end = new Date(now.getFullYear(), now.getMonth(), 1);
+  } else if (adminBillingPeriod === 'This Year') start = new Date(now.getFullYear(), 0, 1);
+
+  const { data } = await sb.rpc('get_admin_billing_overview', { p_period_start: start.toISOString(), p_period_end: end.toISOString() });
+  adminBillingData = data || [];
+  renderAdminBillingTab();
+  loadPlatformGatewayStatus();
+}
+
+const PLATFORM_PAYMOB_FIELDS = [
   { key: 'api_key', label: 'API Key' },
   { key: 'hmac_secret', label: 'HMAC Secret' },
   { key: 'integration_id', label: 'Card Integration ID' },
