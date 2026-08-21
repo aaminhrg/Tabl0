@@ -448,20 +448,52 @@ async function choosePlan(plan) {
   }
 }
 
+async function handleAutoRenewToggle(enabled) {
+  const { data } = await sb.rpc('toggle_auto_renew', { p_tenant_id: state.tenant.id, p_enabled: enabled });
+  if (data && data.error) {
+    alert(data.error);
+    renderBillingTab(); // reset the checkbox visually since the change didn't take effect
+    return;
+  }
+  state.tenant.auto_renew = enabled;
+}
 async function switchToPayg() {
-  if (!confirm('Switch to Pay-as-you-go? Your Pro subscription (if active) should be cancelled separately in your Stripe billing portal to avoid being charged again.')) return;
+  if (!confirm('Switch to Pay-as-you-go? If auto-renewal is on, turn it off first in Settings — otherwise your saved card may be charged again at the next renewal date.')) return;
   await sb.rpc('set_billing_plan', { p_tenant_id: state.tenant.id, p_plan: 'payg' });
   state.tenant.billing_plan = 'payg';
   state.tenant.platform_fee_percent = 0.8;
   render();
 }
 
-async function startProCheckout() {
+function showProBillingCycleChoice() {
+  document.querySelectorAll('.overlay').forEach(el => el.remove());
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="ticket">
+      <h2>Choose your billing cycle</h2>
+      <div style="display:flex;gap:12px;margin-top:14px">
+        <div class="category-block" style="flex:1;text-align:center;cursor:pointer" onclick="startProCheckout('monthly')">
+          <h3 style="font-size:16px">Monthly</h3>
+          <div style="font-size:24px;font-weight:bold;margin:8px 0">800 EGP</div>
+          <p class="small">Billed every 30 days</p>
+        </div>
+        <div class="category-block" style="flex:1;text-align:center;cursor:pointer;border-color:var(--gold)" onclick="startProCheckout('annual')">
+          <h3 style="font-size:16px">Annual <span class="pill ok">Save 2 months</span></h3>
+          <div style="font-size:24px;font-weight:bold;margin:8px 0">8000 EGP</div>
+          <p class="small">Billed every 365 days — vs 9600 EGP paying monthly</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+async function startProCheckout(billingCycle) {
+  const cycle = billingCycle === 'annual' ? 'annual' : 'monthly';
   const { data: { session } } = await sb.auth.getSession();
   const res = await fetch(`${SUPABASE_URL}/functions/v1/paymob-pro-create-payment`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tenant_id: state.tenant.id, redirect_url: window.location.origin + window.location.pathname })
+    body: JSON.stringify({ tenant_id: state.tenant.id, redirect_url: window.location.origin + window.location.pathname, billing_cycle: cycle })
   });
   const data = await res.json();
   if (data.error) {
@@ -1589,12 +1621,20 @@ function renderBillingTab() {
         <div class="category-block" style="${plan==='pro' ? 'border-color:var(--gold)' : ''}">
           <h3 style="font-size:16px">Pro ${plan==='pro' ? `<span class="pill ${t.subscription_status==='active'?'ok':'warn'}">${escapeHtml(t.subscription_status)}</span>` : ''}</h3>
           <div style="font-size:22px;font-weight:bold;margin:6px 0">800 EGP<span style="font-size:13px;font-weight:normal;color:var(--ink-soft)">/month</span></div>
-          <p class="small">0% per order.</p>
+          <p class="small">0% per order. Monthly or annual (2 months free) available.</p>
           ${plan==='pro' && t.pro_paid_until ? `
-            <p class="small" style="margin-top:6px">Paid through ${new Date(t.pro_paid_until).toLocaleDateString()}${new Date(t.pro_paid_until) < new Date() ? ' — expired, pay again to reactivate 0% pricing' : ''}</p>
-            <button class="btn btn-sm" style="margin-top:6px" onclick="startProCheckout()">Renew for another 30 days</button>
+            <p class="small" style="margin-top:6px">${t.billing_cycle==='annual'?'Annual plan':'Monthly plan'} — paid through ${new Date(t.pro_paid_until).toLocaleDateString()}${new Date(t.pro_paid_until) < new Date() ? ' — expired, pay again to reactivate 0% pricing' : ''}</p>
+            <button class="btn btn-sm" style="margin-top:6px" onclick="showProBillingCycleChoice()">Renew</button>
+            <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
+              ${t.paymob_card_token ? `
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                  <input type="checkbox" ${t.auto_renew ? 'checked' : ''} onchange="handleAutoRenewToggle(this.checked)"/>
+                  <span class="small">Auto-renew using saved card</span>
+                </label>
+              ` : `<p class="small" style="color:var(--ink-soft)">Save your card during payment ("Save Card" checkbox) to enable auto-renewal.</p>`}
+            </div>
           ` : ''}
-          ${plan!=='pro' ? '<button class="btn btn-sm" onclick="startProCheckout()">Switch to this plan</button>' : ''}
+          ${plan!=='pro' ? '<button class="btn btn-sm" onclick="showProBillingCycleChoice()">Switch to this plan</button>' : ''}
         </div>
       </div>
     </div>
