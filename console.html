@@ -1793,10 +1793,10 @@ function renderBillingTab() {
             <button class="btn btn-sm" style="margin-top:6px" onclick="showProBillingCycleChoice()">Renew</button>
             <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
               ${t.paymob_card_token ? `
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                  <input type="checkbox" ${t.auto_renew ? 'checked' : ''} onchange="handleAutoRenewToggle(this.checked)"/>
-                  <span class="small">Auto-renew using saved card</span>
-                </label>
+                <div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="if(event.target.tagName!=='INPUT'){const cb=this.querySelector('input');cb.checked=!cb.checked;handleAutoRenewToggle(cb.checked);}">
+                  <input type="checkbox" style="flex:0 0 auto;width:16px;height:16px" ${t.auto_renew ? 'checked' : ''} onchange="handleAutoRenewToggle(this.checked)"/>
+                  <span style="flex:1;min-width:0;font-size:12px;font-family:var(--mono);color:var(--ink-soft)">Auto-renew using saved card</span>
+                </div>
               ` : `<p class="small" style="color:var(--ink-soft)">Save your card during payment ("Save Card" checkbox) to enable auto-renewal.</p>`}
             </div>
           ` : ''}
