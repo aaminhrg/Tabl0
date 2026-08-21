@@ -458,17 +458,43 @@ async function switchToPayg() {
 
 async function startProCheckout() {
   const { data: { session } } = await sb.auth.getSession();
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/stripe-subscription-checkout`, {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/paymob-pro-create-payment`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tenant_id: state.tenant.id, return_url: window.location.origin + window.location.pathname })
+    body: JSON.stringify({ tenant_id: state.tenant.id, redirect_url: window.location.origin + window.location.pathname })
   });
   const data = await res.json();
   if (data.error) {
-    alert('Pro plan checkout isn\'t available yet: ' + data.error + '\n\nYou can continue with Pay-as-you-go for now and switch to Pro later from Settings once it\'s set up.');
+    alert('Pro plan payment isn\'t available yet: ' + data.error + '\n\nYou can continue with Pay-as-you-go for now.');
     return;
   }
-  window.location.href = data.checkout_url;
+  showProPaymentCheckout(data.checkout_url);
+}
+function showProPaymentCheckout(checkoutUrl) {
+  // Paymob's product is specifically an IFRAME product — embedding it
+  // (rather than a full-page redirect) is what actually works, same
+  // lesson learned building the customer checkout flow.
+  document.querySelectorAll('.overlay').forEach(el => el.remove());
+  const body = document.getElementById('tab-body');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="ticket">
+      <h2>Upgrade to Pro</h2>
+      <p class="lead">Pay 800 EGP to activate Pro for 30 days. You'll be returned here automatically once it's confirmed.</p>
+      <iframe src="${checkoutUrl.replace(/"/g, '&quot;')}" style="width:100%;height:70vh;border:1px solid var(--line);border-radius:12px;background:#fff"></iframe>
+    </div>
+  `;
+  const pollInterval = setInterval(async () => {
+    const { data } = await sb.from('tenants').select('billing_plan, subscription_status, pro_paid_until').eq('id', state.tenant.id).single();
+    if (data && data.billing_plan === 'pro' && data.subscription_status === 'active') {
+      clearInterval(pollInterval);
+      state.tenant.billing_plan = data.billing_plan;
+      state.tenant.subscription_status = data.subscription_status;
+      state.tenant.pro_paid_until = data.pro_paid_until;
+      state.tenant.platform_fee_percent = 0;
+      renderBillingTab();
+    }
+  }, 4000);
 }
 async function handleLogout() { await sb.auth.signOut(); }
 
@@ -1555,6 +1581,10 @@ function renderBillingTab() {
           <h3 style="font-size:16px">Pro ${plan==='pro' ? `<span class="pill ${t.subscription_status==='active'?'ok':'warn'}">${escapeHtml(t.subscription_status)}</span>` : ''}</h3>
           <div style="font-size:22px;font-weight:bold;margin:6px 0">800 EGP<span style="font-size:13px;font-weight:normal;color:var(--ink-soft)">/month</span></div>
           <p class="small">0% per order.</p>
+          ${plan==='pro' && t.pro_paid_until ? `
+            <p class="small" style="margin-top:6px">Paid through ${new Date(t.pro_paid_until).toLocaleDateString()}${new Date(t.pro_paid_until) < new Date() ? ' — expired, pay again to reactivate 0% pricing' : ''}</p>
+            <button class="btn btn-sm" style="margin-top:6px" onclick="startProCheckout()">Renew for another 30 days</button>
+          ` : ''}
           ${plan!=='pro' ? '<button class="btn btn-sm" onclick="startProCheckout()">Switch to this plan</button>' : ''}
         </div>
       </div>
