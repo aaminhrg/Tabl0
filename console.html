@@ -1615,17 +1615,37 @@ async function submitTicket() {
 }
 
 function renderOrdersTab() {
-  const payoutStatus = state.tenant.stripe_connect_status || 'not_started';
+  const gatewayLabels = { paymob: 'Paymob', kashier: 'Kashier', paytabs: 'PayTabs', fawry: 'Fawry', stripe: 'Stripe' };
+  const paymentStatusLabel = state.tenant.payment_gateway_status === 'configured'
+    ? `${gatewayLabels[state.tenant.payment_gateway_provider] || state.tenant.payment_gateway_provider} connected`
+    : 'Pay at counter';
+
+  // Same rule as the kitchen queue: for cafés with online payment enabled,
+  // an order isn't actionable until it's actually confirmed paid — otherwise
+  // a customer could abandon checkout and still see their order appear here.
+  const requiresOnlinePayment = state.tenant && state.tenant.payment_gateway_status === 'configured';
+  const visibleOrders = requiresOnlinePayment
+    ? state.orders.filter(o => o.payment_status === 'paid')
+    : state.orders;
+  const awaitingPayment = requiresOnlinePayment
+    ? state.orders.filter(o => o.payment_status !== 'paid' && o.status !== 'cancelled')
+    : [];
+
   return `
     <div class="ticket">
       <div class="eyebrow">${escapeHtml(state.tenant.slug)}</div>
       <h1>${escapeHtml(state.tenant.name)}</h1>
-      <p class="lead">${state.tables.length} table${state.tables.length===1?'':'s'} · ${state.items.length} menu item${state.items.length===1?'':'s'} · Payout: <span class="pill ${payoutStatus==='verified'?'':'warn'}">${payoutStatus.replace('_',' ')}</span></p>
+      <p class="lead">${state.tables.length} table${state.tables.length===1?'':'s'} · ${state.items.length} menu item${state.items.length===1?'':'s'} · Payments: <span class="pill ${state.tenant.payment_gateway_status==='configured'?'ok':'warn'}">${escapeHtml(paymentStatusLabel)}</span></p>
     </div>
     <div class="ticket">
       <h2>Live orders</h2>
-      ${state.orders.length === 0 ? '<div class="empty">No orders yet. Once a customer scans a table QR and orders, it shows up here in real time.</div>' :
-        state.orders.map(o => renderOrderCard(o)).join('')}
+      ${awaitingPayment.length > 0 ? `
+        <div class="msg" style="background:rgba(107,91,71,0.1);color:var(--ink-soft);border:1px solid var(--line);font-size:13px;padding:10px 16px;margin-bottom:12px">
+          ${awaitingPayment.length} order${awaitingPayment.length===1?'':'s'} waiting on payment confirmation — not shown here until paid.
+        </div>
+      ` : ''}
+      ${visibleOrders.length === 0 ? '<div class="empty">No orders yet. Once a customer scans a table QR and orders, it shows up here in real time.</div>' :
+        visibleOrders.map(o => renderOrderCard(o)).join('')}
     </div>
   `;
 }
@@ -1947,7 +1967,6 @@ function saveLoyaltyFromTab() {
 
 function renderSettingsTab() {
   const t = state.tenant;
-  const payoutStatus = t.stripe_connect_status || 'not_started';
   return `
     <div class="ticket">
       <h2>Store details</h2>
