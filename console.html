@@ -202,6 +202,20 @@ async function boot() {
     if (isPendingInvite) return;
   }
 
+  // Paymob's redirect carries the same field names as its webhook. Per
+  // Paymob's own guidance, this is for IMMEDIATE UI feedback only — the
+  // database state (driven by the server-to-server webhook) remains the
+  // real source of truth, so this still confirms against it rather than
+  // trusting the redirect's "success" flag alone.
+  if (urlParams.get('merchant_order_id')) {
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) {
+      state.user = session.user;
+      await handleProPaymentReturn(urlParams.get('merchant_order_id'), urlParams.get('success') === 'true');
+      return;
+    }
+  }
+
   const { data: { session } } = await sb.auth.getSession();
   if (session) {
     state.user = session.user;
@@ -503,6 +517,68 @@ async function startProCheckout(billingCycle) {
     return;
   }
   showProPaymentCheckout(data.checkout_url, data.pro_fee, data.outstanding_dues, data.total_amount, data.billing_cycle);
+}
+async function handleProPaymentReturn(rawParam, redirectSaysSuccess) {
+  // NOTE: Paymob's docs confirm the redirect carries the same FIELDS as
+  // the webhook, but the exact flattened param name for a nested field
+  // like order.merchant_order_id isn't fully confirmed — this checks
+  // several plausible variants and falls back to matching via Paymob's
+  // own numeric order id (which we do store reliably), rather than
+  // assuming one specific param name is correct.
+  const urlParams = new URLSearchParams(window.location.search);
+  const candidateIds = [
+    urlParams.get('merchant_order_id'),
+    urlParams.get('order.merchant_order_id'),
+    rawParam,
+  ].filter(Boolean);
+  const paymobOrderId = urlParams.get('order') || urlParams.get('id');
+
+  history.replaceState({}, '', window.location.pathname); // clean URL, avoid re-triggering on refresh
+  showConfirmationScreen('checking', 'Confirming your payment…');
+
+  // Poll the real database state — the redirect's own "success" flag is
+  // for immediate feedback only, per Paymob's own guidance. Give the
+  // webhook a real window to arrive before treating this as failed.
+  let tenantId = null;
+  for (const candidate of candidateIds) {
+    const { data } = await sb.from('platform_subscription_payments').select('tenant_id').eq('id', candidate).maybeSingle();
+    if (data) { tenantId = data.tenant_id; break; }
+  }
+  if (!tenantId && paymobOrderId) {
+    const { data } = await sb.from('platform_subscription_payments').select('tenant_id').eq('paymob_order_id', String(paymobOrderId)).maybeSingle();
+    if (data) tenantId = data.tenant_id;
+  }
+  if (!tenantId) {
+    showConfirmationScreen('unknown', "We couldn't confirm this payment automatically — check your Billing tab to see the current status.");
+    return;
+  }
+
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const { data: tenant } = await sb.from('tenants').select('billing_plan, subscription_status').eq('id', tenantId).single();
+    if (tenant && tenant.billing_plan === 'pro' && tenant.subscription_status === 'active') {
+      showConfirmationScreen('success', 'Pro is now active — you\'ll keep 100% of every sale.');
+      return;
+    }
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  showConfirmationScreen(redirectSaysSuccess ? 'pending' : 'failed',
+    redirectSaysSuccess ? "Your payment is still being confirmed — this can take a minute. Check Billing shortly." : 'Your payment wasn\'t completed. No charge should have been made — try again from Billing.');
+}
+function showConfirmationScreen(status, message) {
+  const icons = { checking: '⏳', success: '✓', failed: '✕', pending: '⏳', unknown: '?' };
+  const colors = { checking: 'var(--ink-soft)', success: 'var(--gold)', failed: 'var(--error)', pending: 'var(--ink-soft)', unknown: 'var(--ink-soft)' };
+  const titles = { checking: 'Confirming payment', success: 'Payment confirmed', failed: 'Payment not completed', pending: 'Almost there', unknown: 'Checking status' };
+  document.getElementById('app-root').innerHTML = `
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--crema)">
+      <div style="max-width:420px;text-align:center;padding:40px 32px;background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(43,29,20,0.08)">
+        <div style="width:64px;height:64px;border-radius:50%;background:${colors[status]};color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px;margin:0 auto 20px;${status==='checking'||status==='pending' ? 'animation:pulse 1.5s ease-in-out infinite' : ''}">${icons[status]}</div>
+        <h1 style="font-size:20px;margin-bottom:10px">${titles[status]}</h1>
+        <p style="color:var(--ink-soft);font-size:14px;line-height:1.5;margin-bottom:24px">${message}</p>
+        ${status !== 'checking' ? '<button class="btn btn-solid" onclick="window.location.href=window.location.origin+window.location.pathname">Continue to console</button>' : ''}
+      </div>
+      <style>@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }</style>
+    </div>
+  `;
 }
 function showProCheckoutLoading() {
   // The actual create-payment call does 3 real sequential calls to Paymob
