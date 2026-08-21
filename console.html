@@ -468,19 +468,27 @@ async function startProCheckout() {
     alert('Pro plan payment isn\'t available yet: ' + data.error + '\n\nYou can continue with Pay-as-you-go for now.');
     return;
   }
-  showProPaymentCheckout(data.checkout_url);
+  showProPaymentCheckout(data.checkout_url, data.pro_fee, data.outstanding_dues, data.total_amount);
 }
-function showProPaymentCheckout(checkoutUrl) {
+function showProPaymentCheckout(checkoutUrl, proFee, outstandingDues, totalAmount) {
   // Paymob's product is specifically an IFRAME product — embedding it
   // (rather than a full-page redirect) is what actually works, same
   // lesson learned building the customer checkout flow.
   document.querySelectorAll('.overlay').forEach(el => el.remove());
   const body = document.getElementById('tab-body');
   if (!body) return;
+  const hasDues = outstandingDues && outstandingDues > 0;
   body.innerHTML = `
     <div class="ticket">
       <h2>Upgrade to Pro</h2>
-      <p class="lead">Pay 800 EGP to activate Pro for 30 days. You'll be returned here automatically once it's confirmed.</p>
+      ${hasDues ? `
+        <div style="background:var(--crema);border-radius:10px;padding:14px;margin-bottom:14px;font-size:14px">
+          <div style="display:flex;justify-content:space-between;padding:4px 0"><span>Pro plan (30 days)</span><span>${money(proFee)} EGP</span></div>
+          <div style="display:flex;justify-content:space-between;padding:4px 0"><span>Outstanding Pay-as-you-go dues</span><span>${money(outstandingDues)} EGP</span></div>
+          <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px dashed var(--line);margin-top:4px;font-weight:bold"><span>Total</span><span>${money(totalAmount)} EGP</span></div>
+        </div>
+      ` : `<p class="lead">Pay ${money(totalAmount || proFee)} EGP to activate Pro for 30 days.</p>`}
+      <p class="lead" style="font-size:13px">You'll be returned here automatically once it's confirmed.</p>
       <iframe src="${checkoutUrl.replace(/"/g, '&quot;')}" style="width:100%;height:70vh;border:1px solid var(--line);border-radius:12px;background:#fff"></iframe>
     </div>
   `;
