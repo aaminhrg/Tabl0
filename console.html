@@ -477,17 +477,18 @@ function showProPaymentCheckout(checkoutUrl, proFee, outstandingDues, totalAmoun
   document.querySelectorAll('.overlay').forEach(el => el.remove());
   const body = document.getElementById('tab-body');
   if (!body) return;
-  const hasDues = outstandingDues && outstandingDues > 0;
+  const dues = outstandingDues || 0;
+  const fee = proFee || 800;
+  const total = totalAmount || fee;
   body.innerHTML = `
     <div class="ticket">
       <h2>Upgrade to Pro</h2>
-      ${hasDues ? `
-        <div style="background:var(--crema);border-radius:10px;padding:14px;margin-bottom:14px;font-size:14px">
-          <div style="display:flex;justify-content:space-between;padding:4px 0"><span>Pro plan (30 days)</span><span>${money(proFee)} EGP</span></div>
-          <div style="display:flex;justify-content:space-between;padding:4px 0"><span>Outstanding Pay-as-you-go dues</span><span>${money(outstandingDues)} EGP</span></div>
-          <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px dashed var(--line);margin-top:4px;font-weight:bold"><span>Total</span><span>${money(totalAmount)} EGP</span></div>
-        </div>
-      ` : `<p class="lead">Pay ${money(totalAmount || proFee)} EGP to activate Pro for 30 days.</p>`}
+      <div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px">
+        <div style="font-family:var(--mono);font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">Bill summary</div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px"><span>Pro plan — 30 days</span><span style="font-family:var(--mono)">${money(fee)} EGP</span></div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px"><span>Outstanding Pay-as-you-go dues</span><span style="font-family:var(--mono)">${dues > 0 ? money(dues) : '0.00'} EGP</span></div>
+        <div style="display:flex;justify-content:space-between;padding:10px 0 0;margin-top:6px;border-top:1.5px solid var(--ink);font-size:16px;font-weight:bold"><span>Total due today</span><span style="font-family:var(--mono);color:var(--gold)">${money(total)} EGP</span></div>
+      </div>
       <p class="lead" style="font-size:13px">You'll be returned here automatically once it's confirmed.</p>
       <iframe src="${checkoutUrl.replace(/"/g, '&quot;')}" style="width:100%;height:70vh;border:1px solid var(--line);border-radius:12px;background:#fff"></iframe>
     </div>
