@@ -1885,8 +1885,18 @@ function renderOrdersTab() {
     <div class="ticket">
       <h2>Live orders</h2>
       ${awaitingPayment.length > 0 ? `
-        <div class="msg" style="background:rgba(107,91,71,0.1);color:var(--ink-soft);border:1px solid var(--line);font-size:13px;padding:10px 16px;margin-bottom:12px">
-          ${awaitingPayment.length} order${awaitingPayment.length===1?'':'s'} waiting on payment confirmation — not shown here until paid.
+        <div style="margin-bottom:12px">
+          <div class="msg" style="background:rgba(107,91,71,0.1);color:var(--ink-soft);border:1px solid var(--line);font-size:13px;padding:10px 16px;cursor:pointer" onclick="document.getElementById('awaiting-detail').classList.toggle('hidden')">
+            ${awaitingPayment.length} order${awaitingPayment.length===1?'':'s'} waiting on payment confirmation — not shown below until paid. Click to view.
+          </div>
+          <div id="awaiting-detail" class="hidden" style="background:#fff;border:1px solid var(--line);border-top:none;border-radius:0 0 8px 8px;padding:4px 16px">
+            ${awaitingPayment.map(o => `
+              <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--line);font-size:13px">
+                <span>#${o.id.slice(0,8)} · ${Math.round((Date.now()-new Date(o.created_at))/60000)} min ago</span>
+                <span>${money(o.total)} EGP</span>
+              </div>
+            `).join('')}
+          </div>
         </div>
       ` : ''}
       ${visibleOrders.length === 0 ? '<div class="empty">No orders yet. Once a customer scans a table QR and orders, it shows up here in real time.</div>' :
@@ -1962,8 +1972,18 @@ function renderKitchen() {
   root.innerHTML = `
     <div style="padding:20px">
       ${awaitingPayment.length > 0 ? `
-        <div class="msg" style="background:rgba(107,91,71,0.1);color:var(--ink-soft);border:1px solid var(--line);font-size:13px;padding:10px 16px;margin-bottom:12px">
-          ${awaitingPayment.length} order${awaitingPayment.length===1?'':'s'} waiting on payment confirmation — not shown here until paid.
+        <div style="margin-bottom:12px">
+          <div class="msg" style="background:rgba(107,91,71,0.1);color:var(--ink-soft);border:1px solid var(--line);font-size:13px;padding:10px 16px;cursor:pointer" onclick="document.getElementById('kitchen-awaiting-detail').classList.toggle('hidden')">
+            ${awaitingPayment.length} order${awaitingPayment.length===1?'':'s'} waiting on payment confirmation — not shown below until paid. Click to view.
+          </div>
+          <div id="kitchen-awaiting-detail" class="hidden" style="background:#fff;border:1px solid var(--line);border-top:none;border-radius:0 0 8px 8px;padding:4px 16px">
+            ${awaitingPayment.map(o => `
+              <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--line);font-size:13px">
+                <span>#${o.id.slice(0,8)} · ${Math.round((Date.now()-new Date(o.created_at))/60000)} min ago</span>
+                <span>${money(o.total)} EGP</span>
+              </div>
+            `).join('')}
+          </div>
         </div>
       ` : ''}
       ${!audioUnlocked ? `
